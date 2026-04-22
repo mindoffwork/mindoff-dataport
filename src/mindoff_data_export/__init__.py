@@ -60,7 +60,7 @@ def build_template_with_data(
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
 ) -> None | list[str]:
-    """Render placeholders in *schema* with *data* then build output workbook(s)."""
+    """Render placeholders in *schema* with sheet-scoped *data* then build output workbook(s)."""
     if export_mode == "streaming":
         return build_template_streaming_with_data(
             schema=schema,
@@ -90,9 +90,22 @@ def build_template_with_data(
     )
 
 
+class _ModeAPI:
+    """Convenience namespace for a single-import public API."""
+
+    extract = staticmethod(extract_template)
+    build = staticmethod(build_template_with_data)
+    get_inputs = staticmethod(get_template_inputs)
+    alter_schema = staticmethod(render_schema)
+
+
+mode = _ModeAPI()
+
+
 __all__ = [
     "extract_template",
     "build_template_with_data",
     "get_template_inputs",
     "render_schema",
+    "mode",
 ]

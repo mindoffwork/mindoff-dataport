@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import openpyxl
 from openpyxl.cell import WriteOnlyCell
@@ -17,9 +18,9 @@ from .builder import _build_alignment, _build_border, _build_fill, _build_font
 from .renderer import (
     PLACEHOLDER_RE,
     _assert_dataframe,
-    _check_type,
     _infer_cell_type,
     _parse_dims,
+    _resolve_sheet_payloads,
     _substitute_scalars,
     _to_headers,
 )
@@ -172,22 +173,10 @@ def _prepare_streaming_plans(
     default_row_height: float | None,
 ) -> list[_SheetPlan]:
     plans: list[_SheetPlan] = []
-    for sheet in schema["sheets"]:
-        if any(PLACEHOLDER_RE.search(str(c.get("value", ""))) for c in sheet["cells"].values()):
-            # Validate all placeholders that exist in this sheet.
-            for cell in sheet["cells"].values():
-                val = cell.get("value")
-                if not isinstance(val, str):
-                    continue
-                for match in PLACEHOLDER_RE.finditer(val):
-                    key, type_ = match.group(1), match.group(2)
-                    if key not in data:
-                        raise KeyError(
-                            f"Template requires '{key}' (type: {type_}) but it was not provided in data"
-                        )
-                    _check_type(key, data[key], type_)
+    for sheet, output_name, sheet_data, _ in _resolve_sheet_payloads(schema, data):
 
         merged = dict(sheet)
+        merged["name"] = output_name
         if column_width_mode is not None:
             merged["column_width_mode"] = column_width_mode
         if row_height_mode is not None:
@@ -197,11 +186,11 @@ def _prepare_streaming_plans(
         if default_row_height is not None:
             merged["default_row_height"] = default_row_height
 
-        plans.append(_plan_sheet(merged, data))
+        plans.append(_plan_sheet(merged, sheet_data))
     return plans
 
 
-def _plan_sheet(sheet: SheetSchema, data: dict[str, Any]) -> _SheetPlan:
+def _plan_sheet(sheet: SheetSchema, sheet_data: dict[str, Any]) -> _SheetPlan:
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
     static_cells: dict[tuple[int, int], CellSchema] = {}
     anchors: list[_StreamingAnchor] = []
@@ -217,11 +206,11 @@ def _plan_sheet(sheet: SheetSchema, data: dict[str, Any]) -> _SheetPlan:
         full_match = PLACEHOLDER_RE.fullmatch(value.strip())
         if (
             full_match
-            and full_match.group(1) in data
+            and full_match.group(1) in sheet_data
             and full_match.group(2) == "dataframe-content"
         ):
             key = full_match.group(1)
-            source = data[key]
+            source = sheet_data[key]
             _assert_dataframe(key, source)
             columns = _headers_from_source(source)
             style = _AnchorStyle(
@@ -247,11 +236,11 @@ def _plan_sheet(sheet: SheetSchema, data: dict[str, Any]) -> _SheetPlan:
 
         if (
             full_match
-            and full_match.group(1) in data
+            and full_match.group(1) in sheet_data
             and full_match.group(2) == "dataframe-headers"
         ):
             key = full_match.group(1)
-            headers = _to_headers(data[key])
+            headers = _to_headers(sheet_data[key])
             bold_font = dict(cell["font"])
             bold_font["bold"] = True
             for offset, header in enumerate(headers):
@@ -265,7 +254,7 @@ def _plan_sheet(sheet: SheetSchema, data: dict[str, Any]) -> _SheetPlan:
             max_col = max(max_col, col_idx + max(len(headers) - 1, 0))
             continue
 
-        new_val = _substitute_scalars(value, data)
+        new_val = _substitute_scalars(value, sheet_data)
         new_cell = dict(cell)
         new_cell["value"] = new_val
         if full_match:
@@ -423,6 +412,27 @@ def _part_path(base_output_path: str, part: int) -> str:
     return str(p.with_name(f"{p.stem}.part{part:03d}{p.suffix}"))
 
 
+def _bundle_parts_if_needed(base_output_path: str, part_paths: list[str]) -> list[str]:
+    if len(part_paths) <= 1:
+        return part_paths
+
+    output = Path(base_output_path)
+    zip_path = output.with_name(f"{output.stem}.zip")
+    try:
+        with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED) as zip_file:
+            for part_path in part_paths:
+                part = Path(part_path)
+                zip_file.write(part, arcname=part.name)
+    except Exception:
+        if zip_path.exists():
+            zip_path.unlink()
+        raise
+
+    for part_path in part_paths:
+        Path(part_path).unlink()
+    return [str(zip_path)]
+
+
 # §4 Public API
 
 def build_template_streaming_with_data(
@@ -497,5 +507,5 @@ def build_template_streaming_with_data(
         final_path = _part_path(output_path, 1)
         wb.save(final_path)
         output_paths.append(final_path)
-    return output_paths
+    return _bundle_parts_if_needed(output_path, output_paths)
 

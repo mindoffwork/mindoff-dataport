@@ -20,12 +20,13 @@ from .schema import (
     WorkbookSchema,
 )
 
-# §1 Types
+# Section 1 Types
 
-# §2 Constants
+# Section 2 Constants
 
 # Matches {{key:type}} where type may include hyphens (for example dataframe-headers).
 PLACEHOLDER_RE = re.compile(r"\{\{(\w+):([\w-]+)\}\}")
+SHEET_NAME_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 _DATAFRAME_TYPES = frozenset(["dataframe-headers", "dataframe-content"])
 _SCALAR_TYPES = frozenset(["string", "number", "int", "float", "date", "boolean"])
@@ -53,14 +54,15 @@ _DEFAULT_BORDERS: CellBorders = {
     "right": _EMPTY_BORDER_SIDE,
 }
 
-# §3 Private Helpers
+# Section 3 Private Helpers
 
 
-def _validate_data(placeholders: dict[str, str], data: dict[str, Any]) -> None:
+def _validate_data(placeholders: dict[str, str], data: dict[str, Any], scope_label: str) -> None:
     for key, expected_type in placeholders.items():
         if key not in data:
             raise KeyError(
-                f"Template requires '{key}' (type: {expected_type}) but it was not provided in data"
+                f"Sheet '{scope_label}' requires '{key}' (type: {expected_type}) "
+                "but it was not provided in data"
             )
         _check_type(key, data[key], expected_type)
 
@@ -104,6 +106,110 @@ def _assert_headers_input(key: str, value: Any) -> None:
     raise TypeError(
         f"'{key}' expected a polars/pandas DataFrame/LazyFrame or list of header values, got {type(value).__name__}"
     )
+
+
+def _merge_placeholder_types(
+    base: dict[str, str], incoming: dict[str, str], scope_label: str
+) -> dict[str, str]:
+    merged: dict[str, str] = dict(base)
+    for key, type_ in incoming.items():
+        existing = merged.get(key)
+        if existing is not None and existing != type_:
+            raise ValueError(
+                f"Conflicting placeholder types for '{key}' in scope '{scope_label}': "
+                f"'{existing}' vs '{type_}'"
+            )
+        merged[key] = type_
+    return merged
+
+
+def _collect_sheet_placeholders(sheet: SheetSchema) -> dict[str, str]:
+    found: dict[str, str] = {}
+    scope_label = sheet["name"]
+    for cell_schema in sheet["cells"].values():
+        value = cell_schema.get("value")
+        if not isinstance(value, str):
+            continue
+        for match in PLACEHOLDER_RE.finditer(value):
+            key, placeholder_type = match.group(1), match.group(2)
+            if placeholder_type not in _ALL_TYPES:
+                continue
+            existing = found.get(key)
+            if existing is not None and existing != placeholder_type:
+                raise ValueError(
+                    f"Conflicting placeholder types for '{key}' in scope '{scope_label}': "
+                    f"'{existing}' vs '{placeholder_type}'"
+                )
+            found[key] = placeholder_type
+    return found
+
+
+def _sheet_name_placeholder(name: str) -> str | None:
+    match = SHEET_NAME_PLACEHOLDER_RE.fullmatch(name)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _require_dict_payload(*, data: dict[str, Any], key: str, error_label: str) -> dict[str, Any]:
+    if key not in data:
+        raise KeyError(f"Template requires {error_label} '{key}' but it was not provided in data")
+    payload = data[key]
+    if not isinstance(payload, dict):
+        raise TypeError(
+            f"Data for {error_label} '{key}' must be an object/dict, got {type(payload).__name__}"
+        )
+    return payload
+
+
+def _resolve_sheet_payloads(
+    schema: WorkbookSchema, data: dict[str, Any]
+) -> list[tuple[SheetSchema, str, dict[str, Any], dict[str, str]]]:
+    if not isinstance(data, dict):
+        raise TypeError(f"Data must be an object/dict, got {type(data).__name__}")
+
+    resolved: list[tuple[SheetSchema, str, dict[str, Any], dict[str, str]]] = []
+    output_names: set[str] = set()
+
+    for sheet in schema["sheets"]:
+        placeholders = _collect_sheet_placeholders(sheet)
+        dynamic_key = _sheet_name_placeholder(sheet["name"])
+
+        if dynamic_key is None:
+            sheet_payload = _require_dict_payload(data=data, key=sheet["name"], error_label="sheet")
+            _validate_data(placeholders, sheet_payload, sheet["name"])
+            if sheet["name"] in output_names:
+                raise ValueError(f"Duplicate output sheet name '{sheet['name']}' is not allowed")
+            output_names.add(sheet["name"])
+            resolved.append((sheet, sheet["name"], sheet_payload, placeholders))
+            continue
+
+        group_payload = _require_dict_payload(
+            data=data,
+            key=dynamic_key,
+            error_label="dynamic sheet group",
+        )
+        for output_name, sheet_payload in group_payload.items():
+            if not isinstance(output_name, str):
+                raise TypeError(
+                    f"Dynamic sheet names under '{dynamic_key}' must be strings, "
+                    f"got {type(output_name).__name__}"
+                )
+            if not isinstance(sheet_payload, dict):
+                raise TypeError(
+                    f"Data for dynamic sheet '{output_name}' under '{dynamic_key}' "
+                    f"must be an object/dict, got {type(sheet_payload).__name__}"
+                )
+            _validate_data(placeholders, sheet_payload, output_name)
+            if output_name in output_names:
+                raise ValueError(f"Duplicate output sheet name '{output_name}' is not allowed")
+            output_names.add(output_name)
+            resolved.append((sheet, output_name, sheet_payload, placeholders))
+
+    if not resolved:
+        raise ValueError("No output sheets were resolved from template + input data")
+
+    return resolved
 
 
 def _render_sheet(sheet: SheetSchema, data: dict[str, Any]) -> SheetSchema:
@@ -323,25 +429,40 @@ def _parse_dims(dimensions: str) -> tuple[int, int, int, int]:
     )
 
 
-# §4 Public API
+# Section 4 Public API
 
 
-def get_template_inputs(schema: WorkbookSchema) -> dict[str, str]:
-    """Return {key: type} for every valid {{key:type}} placeholder in cell values."""
-    found: dict[str, str] = {}
+def get_template_inputs(schema: WorkbookSchema) -> dict[str, Any]:
+    """Return sheet-scoped required inputs including dynamic sheet groups."""
+    found: dict[str, Any] = {}
     for sheet in schema["sheets"]:
-        for cell_schema in sheet["cells"].values():
-            value = cell_schema.get("value")
-            if isinstance(value, str):
-                for match in PLACEHOLDER_RE.finditer(value):
-                    key, placeholder_type = match.group(1), match.group(2)
-                    if placeholder_type in _ALL_TYPES:
-                        found[key] = placeholder_type
+        placeholders = _collect_sheet_placeholders(sheet)
+        dynamic_key = _sheet_name_placeholder(sheet["name"])
+        if dynamic_key is None:
+            found[sheet["name"]] = placeholders
+            continue
+
+        existing = found.get(dynamic_key)
+        if existing is None:
+            found[dynamic_key] = {"*": placeholders}
+            continue
+
+        if not isinstance(existing, dict) or "*" not in existing:
+            raise ValueError(
+                f"Template contains incompatible scopes for key '{dynamic_key}' in sheet inputs"
+            )
+        found[dynamic_key] = {
+            "*": _merge_placeholder_types(existing["*"], placeholders, dynamic_key)
+        }
+
     return found
 
 
 def render_schema(schema: WorkbookSchema, data: dict[str, Any]) -> WorkbookSchema:
-    """Validate data against placeholders and return a resolved workbook schema."""
-    placeholders = get_template_inputs(schema)
-    _validate_data(placeholders, data)
-    return {"sheets": [_render_sheet(sheet, data) for sheet in schema["sheets"]]}
+    """Validate sheet-scoped data and return a resolved workbook schema."""
+    resolved_sheets: list[SheetSchema] = []
+    for sheet, output_name, sheet_data, _ in _resolve_sheet_payloads(schema, data):
+        rendered = _render_sheet(sheet, sheet_data)
+        rendered["name"] = output_name
+        resolved_sheets.append(rendered)
+    return {"sheets": resolved_sheets}

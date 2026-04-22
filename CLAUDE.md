@@ -39,6 +39,10 @@ Rules:
 - `build_template_with_data(schema, data, output_path, **sizing_kwargs)`
 - `get_template_inputs(schema)`
 - `render_schema(schema, data)`
+- `mode.extract(path)` (alias of `extract_template`)
+- `mode.build(schema, data, output_path, **sizing_kwargs)` (alias of `build_template_with_data`)
+- `mode.get_inputs(schema)` (alias of `get_template_inputs`)
+- `mode.alter_schema(schema, data)` (alias of `render_schema`)
 
 Notes:
 - `build_template_with_data` is the only top-level build/export API.
@@ -47,7 +51,10 @@ Notes:
 `build_template_with_data` now supports:
 - `export_mode="fidelity" | "streaming"` (default: fidelity)
 - `streaming_chunk_rows` and `max_rows_per_workbook` when streaming
-- return type: `None` (fidelity) or `list[str]` (streaming chunk outputs)
+- return type: `None` (fidelity) or `list[str]` (streaming output paths)
+- input contract: sheet-scoped data only (no legacy flat key/value payload)
+  - static sheet: `{ "<sheet_name>": { "<placeholder>": value } }`
+  - dynamic sheet title (`{{sheet_key}}`): `{ "sheet_key": { "<output_sheet_name>": { ... } } }`
 
 ## 4) Non-Negotiable Invariants
 
@@ -61,7 +68,7 @@ Notes:
   - no `hug` sizing
   - no merged-cell output
   - one `dataframe-content` placeholder per sheet
-  - large `dataframe-content` may split across `*.partNNN.xlsx` files
+  - large `dataframe-content` may split across `*.partNNN.xlsx` files and are auto-bundled to `<output_stem>.zip` when multiple parts are produced
 
 ## 5) Sizing Modes
 
@@ -78,8 +85,12 @@ Supported:
 - Dataframe: `dataframe-headers`, `dataframe-content`
 
 Behavior:
-- `get_template_inputs` returns `{key: type}`.
-- `render_schema` validates and resolves placeholders.
+- `get_template_inputs` returns a sheet-scoped contract.
+  - static sheet: `{ "Sheet 1": {"customer_name": "string"} }`
+  - dynamic sheet key: `{ "sheet_2": {"*": {"customer_name": "string"}} }`
+- `render_schema` validates and resolves placeholders per sheet payload.
+- output sheet order follows template order, with dynamic groups expanded in payload insertion order.
+- output sheet names must be unique across static and dynamic expansions.
 - `dataframe-headers` writes header cells only; accepts DataFrame/LazyFrame or list input.
 - `dataframe-content` writes row content only; accepts DataFrame/LazyFrame.
 - In streaming mode, `dataframe-content` is written incrementally (LazyFrame batches first).

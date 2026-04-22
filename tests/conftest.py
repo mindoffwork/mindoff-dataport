@@ -1,7 +1,6 @@
 ﻿import os
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import pytest
@@ -36,25 +35,30 @@ def _patch_windows_mkdir_mode() -> None:
 
 
 def _ensure_writable_temp_root() -> Path:
-    """Use a deterministic project-local temp root for pytest."""
-    fallback_root = PROJECT_ROOT / ".tmp"
-    fallback_root.mkdir(parents=True, exist_ok=True)
+    """Prefer OS temp to avoid workspace file-change loops during test discovery."""
+    system_root = Path(tempfile.gettempdir()) / "mindoff_data_export_pytest"
+    try:
+        system_root.mkdir(parents=True, exist_ok=True)
+        temp_root = system_root
+    except OSError:
+        fallback_root = PROJECT_ROOT / ".tmp"
+        fallback_root.mkdir(parents=True, exist_ok=True)
+        temp_root = fallback_root
 
     # Keep Python and pytest temp discovery aligned.
-    os.environ["TMP"] = str(fallback_root)
-    os.environ["TEMP"] = str(fallback_root)
-    os.environ["TMPDIR"] = str(fallback_root)
-    tempfile.tempdir = str(fallback_root)
-    return fallback_root
+    os.environ["TMP"] = str(temp_root)
+    os.environ["TEMP"] = str(temp_root)
+    os.environ["TMPDIR"] = str(temp_root)
+    tempfile.tempdir = str(temp_root)
+    return temp_root
 
 
-def _configure_unique_basetemp(config) -> None:
+def _configure_stable_basetemp(config) -> None:
     if config.option.basetemp:
         return
-    temp_root = _ensure_writable_temp_root() / "pytest-runs"
+    temp_root = _ensure_writable_temp_root() / "pytest-basetemp"
     temp_root.mkdir(parents=True, exist_ok=True)
-    run_id = f"run-{int(time.time() * 1000)}-{os.getpid()}"
-    config.option.basetemp = str(temp_root / run_id)
+    config.option.basetemp = str(temp_root)
 
 
 def _create_fixture() -> None:
@@ -121,7 +125,7 @@ def _create_fixture() -> None:
 
 def pytest_configure(config) -> None:
     _patch_windows_mkdir_mode()
-    _configure_unique_basetemp(config)
+    _configure_stable_basetemp(config)
     if not FIXTURE_PATH.exists():
         _create_fixture()
 

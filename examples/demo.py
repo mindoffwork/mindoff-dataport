@@ -49,11 +49,24 @@ def _default_for_type(type_name: str) -> Any:
 
 
 def build_typed_payload(
-    variables_by_type: dict[str, str],
-    overrides: dict[str, Any],
+    inputs_contract: dict[str, Any],
+    overrides: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    payload = {key: _default_for_type(var_type) for key, var_type in variables_by_type.items()}
-    payload.update(overrides)
+    payload: dict[str, Any] = {}
+    for scope_key, scope_contract in inputs_contract.items():
+        if isinstance(scope_contract, dict) and "*" in scope_contract:
+            payload[scope_key] = {}
+            continue
+        if not isinstance(scope_contract, dict):
+            raise TypeError(f"Input contract for '{scope_key}' must be a dict")
+        payload[scope_key] = {
+            key: _default_for_type(var_type) for key, var_type in scope_contract.items()
+        }
+
+    for scope_key, scope_values in overrides.items():
+        if scope_key not in payload or not isinstance(payload[scope_key], dict):
+            payload[scope_key] = {}
+        payload[scope_key].update(scope_values)
     return payload
 
 
@@ -92,19 +105,22 @@ def main() -> None:
     print(f"[1/5] Extracting schema from template: {INPUT_TEMPLATE}")
     schema = extract_template(str(INPUT_TEMPLATE))
     print("[2/5] Discovering typed placeholders")
-    variables_by_type = get_template_inputs(schema)
+    inputs_contract = get_template_inputs(schema)
+    primary_sheet = schema["sheets"][0]["name"]
 
     # Core runtime data: scalar + Polars DataFrame
     print("[3/5] Building typed runtime payload (includes Polars DataFrame)")
     data = build_typed_payload(
-        variables_by_type,
+        inputs_contract,
         overrides={
-            "customer_name": "Acme Industries Pvt Ltd",
-            "invoice_number": 1024,
-            "invoice_amount": 24999.75,
-            "is_paid": True,
-            "invoice_date": dt.date(2026, 4, 22),
-            "line_items": get_polars_line_items(),
+            primary_sheet: {
+                "customer_name": "Acme Industries Pvt Ltd",
+                "invoice_number": 1024,
+                "invoice_amount": 24999.75,
+                "is_paid": True,
+                "invoice_date": dt.date(2026, 4, 22),
+                "line_items": get_polars_line_items(),
+            }
         },
     )
 
@@ -127,8 +143,8 @@ def main() -> None:
     )
 
     # Customization 3: DataFrame from LazyFrame + even columns + hug rows.
-    lazy_data = dict(data)
-    lazy_data["line_items"] = get_polars_line_items().lazy()
+    lazy_data = {scope: dict(values) for scope, values in data.items()}
+    lazy_data[primary_sheet]["line_items"] = get_polars_line_items().lazy()
     out_lazy = _build_to_path(
         schema,
         lazy_data,
@@ -141,7 +157,7 @@ def main() -> None:
     elapsed = perf_counter() - started
     print("[5/5] Done")
     print(f"Template: {INPUT_TEMPLATE}")
-    print(f"Variables discovered: {variables_by_type}")
+    print(f"Input contract discovered: {inputs_contract}")
     print(f"Generated: {out_fixed}")
     print(f"Generated: {out_hug}")
     print(f"Generated: {out_lazy}")

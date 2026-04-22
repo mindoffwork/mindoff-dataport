@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from zipfile import ZipFile
 
 import openpyxl
 import pytest
@@ -73,7 +74,7 @@ def test_streaming_split_outputs_and_names(managed_tmp_dir: Path):
 
     paths = build_template_with_data(
         schema,
-        {"rows": df},
+        {"Sheet1": {"rows": df}},
         str(out),
         export_mode="streaming",
         streaming_chunk_rows=2,
@@ -81,16 +82,50 @@ def test_streaming_split_outputs_and_names(managed_tmp_dir: Path):
     )
 
     assert isinstance(paths, list)
-    assert [Path(p).name for p in paths] == ["filled.part001.xlsx", "filled.part002.xlsx"]
+    assert len(paths) == 1
+    zip_path = Path(paths[0])
+    assert zip_path.name == "filled.zip"
+    assert zip_path.exists()
+    assert not (managed_tmp_dir / "filled.part001.xlsx").exists()
+    assert not (managed_tmp_dir / "filled.part002.xlsx").exists()
 
-    wb1 = openpyxl.load_workbook(paths[0], data_only=True)
-    wb2 = openpyxl.load_workbook(paths[1], data_only=True)
+    with ZipFile(zip_path) as zip_file:
+        assert zip_file.namelist() == ["filled.part001.xlsx", "filled.part002.xlsx"]
+        zip_file.extractall(path=managed_tmp_dir)
+
+    part1 = managed_tmp_dir / "filled.part001.xlsx"
+    part2 = managed_tmp_dir / "filled.part002.xlsx"
+    assert part1.exists()
+    assert part2.exists()
+
+    wb1 = openpyxl.load_workbook(part1, data_only=True)
+    wb2 = openpyxl.load_workbook(part2, data_only=True)
     ws1 = wb1["Sheet1"]
     ws2 = wb2["Sheet1"]
     assert [ws1["A1"].value, ws1["A2"].value, ws1["A3"].value] == [1, 2, 3]
     assert [ws2["A1"].value, ws2["A2"].value] == [4, 5]
     wb1.close()
     wb2.close()
+
+
+def test_streaming_single_part_does_not_zip(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    df = polars.DataFrame({"A": [1, 2]})
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+
+    paths = build_template_with_data(
+        schema,
+        {"Sheet1": {"rows": df}},
+        str(out),
+        export_mode="streaming",
+        streaming_chunk_rows=2,
+        max_rows_per_workbook=10,
+    )
+
+    assert len(paths) == 1
+    assert Path(paths[0]).name == "filled.part001.xlsx"
+    assert Path(paths[0]).exists()
+    assert not (managed_tmp_dir / "filled.zip").exists()
 
 
 def test_streaming_rejects_hug_mode(managed_tmp_dir: Path):
@@ -101,7 +136,7 @@ def test_streaming_rejects_hug_mode(managed_tmp_dir: Path):
     with pytest.raises(ValueError, match="does not support 'hug'"):
         build_template_with_data(
             schema,
-            {"rows": df},
+            {"Sheet1": {"rows": df}},
             str(out),
             export_mode="streaming",
             column_width_mode="hug",
@@ -118,7 +153,7 @@ def test_streaming_rejects_merged_regions(managed_tmp_dir: Path):
     out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
 
     with pytest.raises(ValueError, match="does not support merged cells"):
-        build_template_with_data(schema, {"rows": df}, str(out), export_mode="streaming")
+        build_template_with_data(schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming")
 
 
 def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
@@ -129,7 +164,7 @@ def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
     df = polars.DataFrame({"A": [1.5]})
     out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
 
-    paths = build_template_with_data(schema, {"rows": df}, str(out), export_mode="streaming")
+    paths = build_template_with_data(schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming")
     wb = openpyxl.load_workbook(paths[0])
     cell = wb["Sheet1"]["A1"]
     assert cell.fill.fgColor.type == "rgb"
@@ -159,7 +194,7 @@ def test_streaming_lazyframe_uses_collect_batches(monkeypatch, managed_tmp_dir: 
     out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
     paths = build_template_with_data(
         schema,
-        {"rows": lf},
+        {"Sheet1": {"rows": lf}},
         str(out),
         export_mode="streaming",
         streaming_chunk_rows=1,
@@ -170,3 +205,39 @@ def test_streaming_lazyframe_uses_collect_batches(monkeypatch, managed_tmp_dir: 
     wb = openpyxl.load_workbook(paths[0], data_only=True)
     assert [wb["Sheet1"]["A1"].value, wb["Sheet1"]["A2"].value] == [1, 2]
     wb.close()
+
+
+def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
+    schema = {
+        "sheets": [
+            {
+                "name": "{{sheet_1}}",
+                "dimensions": "A1:A1",
+                "merged_regions": [],
+                "column_widths": {},
+                "row_heights": {},
+                "cells": {"A1": _cell("A1", "{{name:string}}")},
+            }
+        ]
+    }
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+
+    paths = build_template_with_data(
+        schema,
+            {
+                "sheet_1": {
+                    "Sheet Name 1": {"name": "Alpha"},
+                    "Sheet Name 2": {"name": "Beta"},
+                }
+            },
+        str(out),
+        export_mode="streaming",
+        max_rows_per_workbook=10,
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    assert wb.sheetnames == ["Sheet Name 1", "Sheet Name 2"]
+    assert wb["Sheet Name 1"]["A1"].value == "Alpha"
+    assert wb["Sheet Name 2"]["A1"].value == "Beta"
+    wb.close()
+

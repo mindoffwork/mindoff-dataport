@@ -2,6 +2,8 @@
 
 Extract Excel templates, fill typed placeholders, and rebuild `.xlsx` files with layout and styling preserved.
 
+Primary entrypoint: `from mindoff_data_export import mode`
+
 ## What This Library Does
 
 - Extract an Excel workbook into a JSON-like schema
@@ -29,23 +31,21 @@ Optional (for demo and DataFrame examples):
 pip install polars
 ```
 
-## Quick Start
+## Quick Start (Recommended Entrypoint)
 
 ```python
-from mindoff_data_export import (
-    extract_template,
-    get_template_inputs,
-    build_template_with_data,
-)
+from mindoff_data_export import mode
 
-schema = extract_template("template.xlsx")
-required_inputs = get_template_inputs(schema)
+schema = mode.extract("template.xlsx")
+required_inputs = mode.get_inputs(schema)
 
-build_template_with_data(
+mode.build(
     schema,
     data={
-        "customer_name": "Acme Industries",
-        "invoice_number": 1024,
+        "Sheet1": {
+            "customer_name": "Acme Industries",
+            "invoice_number": 1024,
+        },
     },
     output_path="filled.xlsx",
     column_width_mode="fixed",
@@ -55,82 +55,120 @@ build_template_with_data(
 
 ## Documentation
 
-### Available Endpoints
+### API Surface
 
-Public functions exposed by this package:
+The package exposes a single entrypoint namespace:
 
-- `extract_template`
-- `build_template_with_data`
-- `get_template_inputs`
-- `render_schema`
+- `mode.extract(path)`
+- `mode.get_inputs(schema)`
+- `mode.alter_schema(schema, data)`
+- `mode.build(schema, data, output_path, **options)`
 
-### 1) `extract_template`
+### Which Function To Use
 
-What it is: Reads an `.xlsx` file and converts it into a `WorkbookSchema` dictionary.
+| Function | What it provides | When to use |
+|---|---|---|
+| `mode.extract(path)` | `WorkbookSchema` parsed from an Excel template | Start of the pipeline when your source is an `.xlsx` template file. |
+| `mode.get_inputs(schema)` | Required dynamic input contract in sheet-scoped form | You do not know all placeholder keys yet and need the template to tell you which inputs are required. |
+| `mode.alter_schema(schema, data)` | A new rendered schema with placeholders resolved | You need an intermediate artifact for review, QA, transformation, or approval before file output. |
+| `mode.build(schema, data, output_path, **options)` | Final workbook output files on disk | You are ready to produce exports from schema + runtime data in one call. |
 
-Why it exists: This is the entry point for turning a designer-authored Excel file into a portable, editable template schema.
+If you already know the required keys and types, you can construct `data` directly and call `mode.build(...)` without `mode.get_inputs(...)`.
 
-Import and call:
+### Recommended Workflow
 
 ```python
-from mindoff_data_export import extract_template
+from mindoff_data_export import mode
 
-schema = extract_template("invoice_template.xlsx")
+schema = mode.extract("invoice_template.xlsx")
+inputs = mode.get_inputs(schema)
+resolved = mode.alter_schema(schema, {"Sheet1": {"customer_name": "Acme"}})
+mode.build(resolved, {"Sheet1": {}}, "filled.xlsx")
 ```
 
-| Parameter | Accepted Input (Type) | Required | Description |
-|---|---|---|---|
-| `path` | `str` (path to `.xlsx`) | Required | File path of the Excel template to extract. |
+### Method Reference
 
-Real-world usage example:
+### 1) `mode.extract`
+
+Converts a designer-authored `.xlsx` template into a portable `WorkbookSchema` that serves as the source-of-truth contract for downstream validation, rendering, and export operations.
+
+Provides: `WorkbookSchema`
+
+Use when: You need to convert an Excel template into the schema object used by all other `mode` functions.
 
 ```python
-from mindoff_data_export import extract_template
+from mindoff_data_export import mode
+
+schema = mode.extract("invoice_template.xlsx")
+```
+
+| Parameter | Type                    | Required | Description                                 |
+| --------- | ----------------------- | -------- | ------------------------------------------- |
+| `path`    | `str` (path to `.xlsx`) | Required | File path of the Excel template to extract. |
+
+Example:
+
+```python
+from mindoff_data_export import mode
 
 # Extract and persist a schema version for later rendering/building.
-schema = extract_template("templates/monthly_sales_report.xlsx")
+schema = mode.extract("templates/monthly_sales_report.xlsx")
 ```
 
-### 2) `build_template_with_data`
+### 2) `mode.build`
 
-What it is: Validates input data, renders placeholders into schema, and builds output workbook(s) in one call.
+Production export operation that validates runtime data, resolves placeholders, and writes final workbook output. Supports high-fidelity export and streaming export modes.
 
-Why it exists: This is the main production API for template-to-export workflows.
+Provides: Exported workbook output on disk (`None` in fidelity mode, `list[str]` output paths in streaming mode).
 
-Import and call:
+Use when: You already have `schema` and `data`, and want to generate final `.xlsx` output files.
 
 ```python
-from mindoff_data_export import build_template_with_data
+from mindoff_data_export import mode
 
-build_template_with_data(schema, data, "filled.xlsx")
+mode.build(schema, data, "filled.xlsx")
 ```
 
-| Parameter | Accepted Input (Type) | Required | Description |
-|---|---|---|---|
-| `schema` | `WorkbookSchema` (`dict`) | Required | Template schema containing placeholders. |
-| `data` | `dict[str, Any]` | Required | Runtime values mapped by placeholder key. |
-| `output_path` | `str` | Required | Output file path; in streaming mode, used as base name for chunked files. |
-| `column_width_mode` | `str \| None` (`"fixed"`, `"even"`, `"hug"`) | Optional | Global override for column sizing. |
-| `row_height_mode` | `str \| None` (`"fixed"`, `"even"`, `"hug"`) | Optional | Global override for row sizing. |
-| `default_column_width` | `float \| None` | Optional | Default even width override. |
-| `default_row_height` | `float \| None` | Optional | Default even height override. |
-| `export_mode` | `Literal["fidelity", "streaming"]` | Optional (default: `"fidelity"`) | `"fidelity"` writes a single workbook preserving merges/styles. `"streaming"` is optimized for large dataframe-content exports. |
-| `streaming_chunk_rows` | `int` | Optional (default: `50000`) | Rows per batch in streaming mode. |
-| `max_rows_per_workbook` | `int` | Optional (default: `1048576`) | Workbook row cap in streaming mode before splitting into `*.partNNN.xlsx`. |
+| Parameter               | Type                                         | Required                         | Description                                                                                                                     |
+| ----------------------- | -------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                | `WorkbookSchema` (`dict`)                    | Required                         | Template schema containing placeholders.                                                                                        |
+| `data`                  | `dict[str, Any]`                             | Required                         | Sheet-scoped runtime values (`sheet_name -> values`) or dynamic sheet group values (`sheet_key -> {output_sheet -> values}`). |
+| `output_path`           | `str`                                        | Required                         | Output file path; in streaming mode, used as base name for chunked files/zip bundle naming.                                    |
+| `column_width_mode`     | `str \| None` (`"fixed"`, `"even"`, `"hug"`) | Optional                         | Global override for column sizing.                                                                                              |
+| `row_height_mode`       | `str \| None` (`"fixed"`, `"even"`, `"hug"`) | Optional                         | Global override for row sizing.                                                                                                 |
+| `default_column_width`  | `float \| None`                              | Optional                         | Default even width override.                                                                                                    |
+| `default_row_height`    | `float \| None`                              | Optional                         | Default even height override.                                                                                                   |
+| `export_mode`           | `Literal["fidelity", "streaming"]`           | Optional (default: `"fidelity"`) | `"fidelity"` writes a single workbook preserving merges/styles. `"streaming"` is optimized for large dataframe-content exports. |
+| `streaming_chunk_rows`  | `int`                                        | Optional (default: `50000`)      | Rows per batch in streaming mode.                                                                                               |
+| `max_rows_per_workbook` | `int`                                        | Optional (default: `1048576`)    | Workbook row cap in streaming mode before splitting into `*.partNNN.xlsx` parts.                                                |
 
-Real-world usage example:
+Return behavior:
+
+- `export_mode="fidelity"` returns `None`
+- `export_mode="streaming"` returns `list[str]`:
+  - single-part export: `[...part001.xlsx]`
+  - multi-part export: `[...zip]` (contains `*.partNNN.xlsx` files)
+
+Input strategy:
+
+- If input keys are already known, pass `data` directly to `mode.build(...)`.
+- If input keys are template-driven or unknown, call `mode.get_inputs(...)` first.
+
+Example:
 
 ```python
-from mindoff_data_export import extract_template, build_template_with_data
+from mindoff_data_export import mode
 
-schema = extract_template("templates/customer_statement.xlsx")
+schema = mode.extract("templates/customer_statement.xlsx")
 
-result = build_template_with_data(
+result = mode.build(
     schema=schema,
     data={
-        "customer_name": "Acme Industries",
-        "statement_date": "2026-04-22",
-        "balance_due": 12450.75,
+        "Sheet1": {
+            "customer_name": "Acme Industries",
+            "statement_date": "2026-04-22",
+            "balance_due": 12450.75,
+        },
     },
     output_path="exports/acme_statement_apr_2026.xlsx",
     export_mode="fidelity",
@@ -142,78 +180,95 @@ result = build_template_with_data(
 assert result is None
 ```
 
-### 3) `get_template_inputs`
+### 3) `mode.get_inputs`
 
-What it is: Scans schema placeholders and returns required inputs as `{key: type}`.
+Derives the required input contract from schema placeholders and returns a sheet-scoped contract for pre-validation, request schema generation, and runtime guardrails.
 
-Why it exists: Lets you validate and build data contracts before rendering/export.
+Provides: A sheet-scoped dictionary of required placeholder keys and expected types.
 
-Import and call:
+Use when: You need to discover dynamic input keys from the template before building your `data` payload.
 
 ```python
-from mindoff_data_export import get_template_inputs
+from mindoff_data_export import mode
 
-inputs = get_template_inputs(schema)
+inputs = mode.get_inputs(schema)
 ```
 
-| Parameter | Accepted Input (Type) | Required | Description |
-|---|---|---|---|
-| `schema` | `WorkbookSchema` (`dict`) | Required | Template schema to inspect for `{{key:type}}` placeholders. |
+| Parameter | Type                      | Required | Description                                                 |
+| --------- | ------------------------- | -------- | ----------------------------------------------------------- |
+| `schema`  | `WorkbookSchema` (`dict`) | Required | Template schema to inspect for `{{key:type}}` placeholders. |
 
-Real-world usage example:
+Example:
 
 ```python
-from mindoff_data_export import extract_template, get_template_inputs
+from mindoff_data_export import mode
 
-schema = extract_template("templates/invoice_template.xlsx")
-required_inputs = get_template_inputs(schema)
+schema = mode.extract("templates/invoice_template.xlsx")
+required_inputs = mode.get_inputs(schema)
 
 print(required_inputs)
 # Example:
 # {
-#   "invoice_number": "number",
-#   "invoice_date": "date",
-#   "customer_name": "string"
+#   "Sheet1": {
+#     "invoice_number": "number",
+#     "invoice_date": "date",
+#     "customer_name": "string"
+#   },
+#   "sheet_2": {
+#     "*": {
+#       "customer_name": "string"
+#     }
+#   }
 # }
 ```
 
-### 4) `render_schema`
+### 4) `mode.alter_schema`
 
-What it is: Validates runtime data and returns a new schema with placeholders resolved.
+Validates runtime data and returns a new schema with placeholders resolved. Use this for audit, transformation, or approval steps before writing output files.
 
-Why it exists: Use this when you want to inspect or transform rendered schema before writing the final workbook.
+Provides: A rendered schema object with placeholders replaced by runtime values.
 
-Import and call:
+Use when: You want to inspect or modify rendered results before calling `mode.build(...)`.
 
 ```python
-from mindoff_data_export import render_schema
+from mindoff_data_export import mode
 
-resolved_schema = render_schema(schema, data)
+resolved_schema = mode.alter_schema(schema, data)
 ```
 
-| Parameter | Accepted Input (Type) | Required | Description |
-|---|---|---|---|
-| `schema` | `WorkbookSchema` (`dict`) | Required | Template schema containing placeholders. |
-| `data` | `dict[str, Any]` | Required | Runtime values used to replace placeholders. |
+| Parameter | Type                      | Required | Description                                  |
+| --------- | ------------------------- | -------- | -------------------------------------------- |
+| `schema`  | `WorkbookSchema` (`dict`) | Required | Template schema containing placeholders.     |
+| `data`    | `dict[str, Any]`          | Required | Sheet-scoped runtime values used to replace placeholders. |
 
-Real-world usage example:
+Example:
 
 ```python
-from mindoff_data_export import extract_template, render_schema, build_template_with_data
+from mindoff_data_export import mode
 
-schema = extract_template("templates/quote_template.xlsx")
-resolved_schema = render_schema(
+schema = mode.extract("templates/quote_template.xlsx")
+resolved_schema = mode.alter_schema(
     schema,
     {
-        "quote_id": 22019,
-        "client_name": "Contoso Retail",
-        "valid_until": "2026-05-15",
+        "Sheet1": {
+            "quote_id": 22019,
+            "client_name": "Contoso Retail",
+            "valid_until": "2026-05-15",
+        },
     },
 )
 
 # Optional inspection/transformation point before file output.
-build_template_with_data(resolved_schema, {}, "exports/quote_22019.xlsx")
+mode.build(resolved_schema, {"Sheet1": {}}, "exports/quote_22019.xlsx")
 ```
+
+### Operational Notes
+
+- Use `mode.get_inputs` before export to validate payload completeness and types early.
+- Choose `export_mode="fidelity"` for styling/merge-preserving outputs.
+- Choose `export_mode="streaming"` for large `dataframe-content` workloads and chunked output generation.
+- In streaming mode, output may split into multiple workbook parts.
+- When multiple parts are produced, they are bundled into `<output_stem>.zip` and the return value contains that zip path.
 
 ## Demo
 
@@ -225,4 +280,4 @@ python examples/demo.py
 
 - Input template: `.xlsx`
 - Output export: `.xlsx`
-- Public API: `extract_template`, `build_template_with_data`, `get_template_inputs`, `render_schema`
+- Public API: `mode.extract`, `mode.build`, `mode.get_inputs`, `mode.alter_schema`
