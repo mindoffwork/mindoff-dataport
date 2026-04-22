@@ -1,0 +1,53 @@
+{
+  "sheets": [
+    {
+      "name": "Report",
+      "dimensions": "A1:C4",
+      "merged_regions": [],
+      "column_widths": {},
+      "row_heights": {},
+      "cells": {
+        "A1": {
+          "coordinate": "A1", "value": "Client:", "cell_type": "string",
+          "number_format": null, "merged": false, "merge_anchor": null,
+          "font": {"name": "Calibri", "size": 11.0, "bold": false, "italic": false, "underline": null, "color": null},
+          "fill": {"bg_color": null},
+          "alignment": {"horizontal": null, "vertical": null, "wrap_text": false},
+          "borders": {"top": {"style": null, "color": null}, "bottom": {"style": null, "color": null}, "left": {"style": null, "color": null}, "right": {"style": null, "color": null}}
+        },
+        "B1": {
+          "coordinate": "B1", "value": "{{client_name:string}}", "cell_type": "string",
+          "number_format": null, "merged": false, "merge_anchor": null,
+          "font": {"name": "Calibri", "size": 11.0, "bold": false, "italic": false, "underline": null, "color": null},
+          "fill": {"bg_color": null},
+          "alignment": {"horizontal": null, "vertical": null, "wrap_text": false},
+          "borders": {"top": {"style": null, "color": null}, "bottom": {"style": null, "color": null}, "left": {"style": null, "color": null}, "right": {"style": null, "color": null}}
+        },
+        "A2": {
+          "coordinate": "A2", "value": "Quarter:", "cell_type": "string",
+          "number_format": null, "merged": false, "merge_anchor": null,
+          "font": {"name": "Calibri", "size": 11.0, "bold": false, "italic": false, "underline": null, "color": null},
+          "fill": {"bg_color": null},
+          "alignment": {"horizontal": null, "vertical": null, "wrap_text": false},
+          "borders": {"top": {"style": null, "color": null}, "bottom": {"style": null, "color": null}, "left": {"style": null, "color": null}, "right": {"style": null, "color": null}}
+        },
+        "B2": {
+          "coordinate": "B2", "value": "{{quarter:string}}", "cell_type": "string",
+          "number_format": null, "merged": false, "merge_anchor": null,
+          "font": {"name": "Calibri", "size": 11.0, "bold": false, "italic": false, "underline": null, "color": null},
+          "fill": {"bg_color": null},
+          "alignment": {"horizontal": null, "vertical": null, "wrap_text": false},
+          "borders": {"top": {"style": null, "color": null}, "bottom": {"style": null, "color": null}, "left": {"style": null, "color": null}, "right": {"style": null, "color": null}}
+        },
+        "A4": {
+          "coordinate": "A4", "value": "{{sales:dataframe-headers}}", "cell_type": "string",
+          "number_format": null, "merged": false, "merge_anchor": null,
+          "font": {"name": "Calibri", "size": 11.0, "bold": false, "italic": false, "underline": null, "color": null},
+          "fill": {"bg_color": null},
+          "alignment": {"horizontal": null, "vertical": null, "wrap_text": false},
+          "borders": {"top": {"style": null, "color": null}, "bottom": {"style": null, "color": null}, "left": {"style": null, "color": null}, "right": {"style": null, "color": null}}
+        }
+      }
+    }
+  ]
+}
