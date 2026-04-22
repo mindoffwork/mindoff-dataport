@@ -20,9 +20,7 @@ from .schema import (
     WorkbookSchema,
 )
 
-# Section 1 Types
-
-# Section 2 Constants
+# §1 Constants & Exceptions
 
 # Matches {{key:type}} where type may include hyphens (for example dataframe-headers).
 PLACEHOLDER_RE = re.compile(r"\{\{(\w+):([\w-]+)\}\}")
@@ -54,10 +52,14 @@ _DEFAULT_BORDERS: CellBorders = {
     "right": _EMPTY_BORDER_SIDE,
 }
 
-# Section 3 Private Helpers
+# §2 Classes and Sub Classes
+
+# §3 Private Helper Functions
 
 
-def _validate_data(placeholders: dict[str, str], data: dict[str, Any], scope_label: str) -> None:
+def _validate_data(
+    placeholders: dict[str, str], data: dict[str, Any], scope_label: str
+) -> None:
     for key, expected_type in placeholders.items():
         if key not in data:
             raise KeyError(
@@ -85,7 +87,9 @@ def _check_type(key: str, value: Any, expected: str) -> None:
     }
     allowed = type_map.get(expected)
     if allowed and not isinstance(value, allowed):
-        raise TypeError(f"'{key}' expected type '{expected}', got {type(value).__name__}")
+        raise TypeError(
+            f"'{key}' expected type '{expected}', got {type(value).__name__}"
+        )
 
 
 def _assert_dataframe(key: str, value: Any) -> None:
@@ -151,9 +155,13 @@ def _sheet_name_placeholder(name: str) -> str | None:
     return match.group(1)
 
 
-def _require_dict_payload(*, data: dict[str, Any], key: str, error_label: str) -> dict[str, Any]:
+def _require_dict_payload(
+    *, data: dict[str, Any], key: str, error_label: str
+) -> dict[str, Any]:
     if key not in data:
-        raise KeyError(f"Template requires {error_label} '{key}' but it was not provided in data")
+        raise KeyError(
+            f"Template requires {error_label} '{key}' but it was not provided in data"
+        )
     payload = data[key]
     if not isinstance(payload, dict):
         raise TypeError(
@@ -176,10 +184,14 @@ def _resolve_sheet_payloads(
         dynamic_key = _sheet_name_placeholder(sheet["name"])
 
         if dynamic_key is None:
-            sheet_payload = _require_dict_payload(data=data, key=sheet["name"], error_label="sheet")
+            sheet_payload = _require_dict_payload(
+                data=data, key=sheet["name"], error_label="sheet"
+            )
             _validate_data(placeholders, sheet_payload, sheet["name"])
             if sheet["name"] in output_names:
-                raise ValueError(f"Duplicate output sheet name '{sheet['name']}' is not allowed")
+                raise ValueError(
+                    f"Duplicate output sheet name '{sheet['name']}' is not allowed"
+                )
             output_names.add(sheet["name"])
             resolved.append((sheet, sheet["name"], sheet_payload, placeholders))
             continue
@@ -202,7 +214,9 @@ def _resolve_sheet_payloads(
                 )
             _validate_data(placeholders, sheet_payload, output_name)
             if output_name in output_names:
-                raise ValueError(f"Duplicate output sheet name '{output_name}' is not allowed")
+                raise ValueError(
+                    f"Duplicate output sheet name '{output_name}' is not allowed"
+                )
             output_names.add(output_name)
             resolved.append((sheet, output_name, sheet_payload, placeholders))
 
@@ -263,7 +277,9 @@ def _render_sheet(sheet: SheetSchema, data: dict[str, Any]) -> SheetSchema:
             new_cell["cell_type"] = _infer_cell_type(new_value)
         new_cells[coord] = new_cell  # type: ignore[assignment]
 
-    new_dims = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
+    new_dims = (
+        f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
+    )
     result: dict[str, Any] = dict(sheet)
     result["cells"] = new_cells
     result["dimensions"] = new_dims
@@ -390,7 +406,9 @@ def _to_rows(df: Any) -> tuple[list[str], list[tuple[Any, ...]]]:
     if "pandas" in module and "DataFrame" in qualname:
         return list(df.columns), [tuple(row) for row in df.itertuples(index=False)]
 
-    raise TypeError(f"Expected a polars or pandas DataFrame/LazyFrame, got {type(df).__name__}")
+    raise TypeError(
+        f"Expected a polars or pandas DataFrame/LazyFrame, got {type(df).__name__}"
+    )
 
 
 def _to_headers(df_or_headers: Any) -> list[str]:
@@ -429,7 +447,7 @@ def _parse_dims(dimensions: str) -> tuple[int, int, int, int]:
     )
 
 
-# Section 4 Public API
+# §4 Public Functions
 
 
 def get_template_inputs(schema: WorkbookSchema) -> dict[str, Any]:
@@ -466,3 +484,6 @@ def render_schema(schema: WorkbookSchema, data: dict[str, Any]) -> WorkbookSchem
         rendered["name"] = output_name
         resolved_sheets.append(rendered)
     return {"sheets": resolved_sheets}
+
+
+# §5 Entrypoints

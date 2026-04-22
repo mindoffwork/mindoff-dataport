@@ -6,13 +6,17 @@ from .renderer import get_template_inputs, render_schema
 from .schema import WorkbookSchema
 from .streaming import build_template_streaming_with_data
 
-# §1 Types
+__all__ = [
+    "extract_template",
+    "build_template_with_data",
+    "get_template_inputs",
+    "render_schema",
+    "mode",
+]
 
-# §2 Constants
+# §1 Constants & Exceptions
 
-# §3 Private Helpers
-
-# §4 Public API
+# §2 Classes and Sub Classes
 
 
 @overload
@@ -47,6 +51,33 @@ def build_template_with_data(
 ) -> list[str]: ...
 
 
+# §3 Private Helper Functions
+
+
+def _build_with_fidelity(
+    schema: WorkbookSchema,
+    data: dict[str, Any],
+    output_path: str,
+    *,
+    column_width_mode: str | None = None,
+    row_height_mode: str | None = None,
+    default_column_width: float | None = None,
+    default_row_height: float | None = None,
+) -> None:
+    resolved = render_schema(schema, data)
+    _build_template(
+        resolved,
+        output_path,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+    )
+
+
+# §4 Public Functions
+
+
 def build_template_with_data(
     schema: WorkbookSchema,
     data: dict[str, Any],
@@ -73,21 +104,21 @@ def build_template_with_data(
             streaming_chunk_rows=streaming_chunk_rows,
             max_rows_per_workbook=max_rows_per_workbook,
         )
-
     if export_mode != "fidelity":
         raise ValueError(
             f"Unsupported export_mode '{export_mode}'. Expected 'fidelity' or 'streaming'."
         )
 
-    resolved = render_schema(schema, data)
-    _build_template(
-        resolved,
-        output_path,
+    _build_with_fidelity(
+        schema=schema,
+        data=data,
+        output_path=output_path,
         column_width_mode=column_width_mode,
         row_height_mode=row_height_mode,
         default_column_width=default_column_width,
         default_row_height=default_row_height,
     )
+    return None
 
 
 class _ModeAPI:
@@ -101,11 +132,4 @@ class _ModeAPI:
 
 mode = _ModeAPI()
 
-
-__all__ = [
-    "extract_template",
-    "build_template_with_data",
-    "get_template_inputs",
-    "render_schema",
-    "mode",
-]
+# §5 Entrypoints

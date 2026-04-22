@@ -6,11 +6,11 @@ from mindoff_data_export import (
     render_schema,
 )
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
 
 def _cell(coord: str, value: str) -> dict:
@@ -55,7 +55,7 @@ def _schema() -> dict:
     }
 
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_mode_namespace_exposes_expected_aliases():
@@ -73,3 +73,6 @@ def test_mode_renderer_aliases_work():
 
     rendered = mode.alter_schema(schema, {"Sheet1": {"name": "Alice"}})
     assert rendered["sheets"][0]["cells"]["A1"]["value"] == "Alice"
+
+
+# §5 Entrypoints

@@ -20,9 +20,7 @@ from .schema import (
 )
 from .utils import border_side_to_dict, normalize_color
 
-# §1 Types
-
-# §2 Constants
+# §1 Constants & Exceptions
 
 # Shared defaults used for merged-cell stubs (never mutated downstream).
 _EMPTY_BORDER_SIDE: BorderSide = {"style": None, "color": None}
@@ -34,7 +32,11 @@ _EMPTY_FONT: FontSchema = {
     "underline": None,
     "color": None,
 }
-_EMPTY_ALIGNMENT: AlignmentSchema = {"horizontal": None, "vertical": None, "wrap_text": False}
+_EMPTY_ALIGNMENT: AlignmentSchema = {
+    "horizontal": None,
+    "vertical": None,
+    "wrap_text": False,
+}
 _EMPTY_BORDERS: CellBorders = {
     "top": _EMPTY_BORDER_SIDE,
     "bottom": _EMPTY_BORDER_SIDE,
@@ -42,7 +44,9 @@ _EMPTY_BORDERS: CellBorders = {
     "right": _EMPTY_BORDER_SIDE,
 }
 
-# §3 Private Helpers
+# §2 Classes and Sub Classes
+
+# §3 Private Helper Functions
 
 
 def _extract_sheet(ws: Worksheet) -> SheetSchema:
@@ -108,7 +112,9 @@ def _extract_cell(cell: Cell | MergedCell, merge_map: dict[str, str]) -> CellSch
         "coordinate": cell.coordinate,
         "value": _serialize_value(cell.value),
         "cell_type": _infer_cell_type(cell),
-        "number_format": cell.number_format if cell.number_format not in (None, "General") else None,
+        "number_format": (
+            cell.number_format if cell.number_format not in (None, "General") else None
+        ),
         "font": _extract_font(cell),
         "fill": _extract_fill(cell),
         "alignment": _extract_alignment(cell),
@@ -125,7 +131,9 @@ def _infer_cell_type(cell: Cell) -> CellType:
         return "formula"
     if cell.data_type == "n":
         return "number"
-    if cell.data_type == "d" or isinstance(cell.value, (datetime.datetime, datetime.date)):
+    if cell.data_type == "d" or isinstance(
+        cell.value, (datetime.datetime, datetime.date)
+    ):
         return "date"
     return "string"
 
@@ -177,10 +185,13 @@ def _extract_borders(cell: Cell) -> CellBorders:
     }
 
 
-# §4 Public API
+# §4 Public Functions
 
 
 def extract_template(path: str) -> WorkbookSchema:
     """Load .xlsx at *path* and return a WorkbookSchema dict."""
     wb = openpyxl.load_workbook(path, data_only=False)
     return {"sheets": [_extract_sheet(ws) for ws in wb.worksheets]}
+
+
+# §5 Entrypoints

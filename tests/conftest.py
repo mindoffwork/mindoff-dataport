@@ -1,22 +1,21 @@
-﻿import os
+import os
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-# §1 Types
-
-# §2 Constants
+# §1 Constants & Exceptions
 
 # Ensure src is on path when running without editable install.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 PROJECT_ROOT = Path(__file__).parent.parent
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_template.xlsx"
-
-# §3 Private Helpers
-
 _ORIGINAL_OS_MKDIR = os.mkdir
+
+# §2 Classes and Sub Classes
+
+# §3 Private Helper Functions
 
 
 def _patch_windows_mkdir_mode() -> None:
@@ -123,14 +122,14 @@ def _create_fixture() -> None:
     wb.save(str(FIXTURE_PATH))
 
 
+# §4 Public Functions
+
+
 def pytest_configure(config) -> None:
     _patch_windows_mkdir_mode()
     _configure_stable_basetemp(config)
     if not FIXTURE_PATH.exists():
         _create_fixture()
-
-
-# §4 Public API
 
 
 @pytest.fixture(scope="session")
@@ -149,3 +148,6 @@ def workbook_schema(fixture_path):
 def managed_tmp_dir(tmp_path: Path) -> Path:
     """Provide a pytest-managed per-test temporary directory."""
     return tmp_path
+
+
+# §5 Entrypoints

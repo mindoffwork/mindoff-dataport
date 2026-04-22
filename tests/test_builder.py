@@ -1,12 +1,12 @@
 import openpyxl
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_build_creates_file(workbook_schema, managed_tmp_dir):
@@ -82,3 +82,6 @@ def test_anchor_cell_value_reconstructed(workbook_schema, managed_tmp_dir):
     ws = wb.worksheets[0]
     assert ws["A1"].value == "Merged Header"
     wb.close()
+
+
+# §5 Entrypoints

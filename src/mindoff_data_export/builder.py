@@ -5,7 +5,11 @@ import functools
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill
-from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter
+from openpyxl.utils.cell import (
+    column_index_from_string,
+    coordinate_from_string,
+    get_column_letter,
+)
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .schema import (
@@ -19,11 +23,11 @@ from .schema import (
 )
 from .utils import argb_to_color, dict_to_border_side
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
 
 def _build_sheet(ws: Worksheet, schema: SheetSchema) -> None:
@@ -135,7 +139,9 @@ def _apply_merges(ws: Worksheet, schema: SheetSchema) -> None:
 
 def _freeze(d: dict) -> tuple:
     """Convert nested dicts to a stable hashable key for style caches."""
-    return tuple((k, _freeze(v) if isinstance(v, dict) else v) for k, v in sorted(d.items()))
+    return tuple(
+        (k, _freeze(v) if isinstance(v, dict) else v) for k, v in sorted(d.items())
+    )
 
 
 @functools.lru_cache(maxsize=512)
@@ -160,7 +166,9 @@ def _cached_fill(key: tuple) -> PatternFill:
 @functools.lru_cache(maxsize=512)
 def _cached_alignment(key: tuple) -> Alignment:
     d = dict(key)
-    return Alignment(horizontal=d["horizontal"], vertical=d["vertical"], wrap_text=d["wrap_text"])
+    return Alignment(
+        horizontal=d["horizontal"], vertical=d["vertical"], wrap_text=d["wrap_text"]
+    )
 
 
 @functools.lru_cache(maxsize=512)
@@ -190,7 +198,7 @@ def _build_border(schema: CellBorders) -> Border:
     return _cached_border(_freeze(schema))
 
 
-# §4 Public API
+# §4 Public Functions
 
 
 def build_template(
@@ -224,3 +232,6 @@ def build_template(
         _build_sheet(ws, sheet_schema)
 
     wb.save(output_path)
+
+
+# §5 Entrypoints

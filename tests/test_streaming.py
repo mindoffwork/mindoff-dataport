@@ -8,11 +8,13 @@ import pytest
 
 from mindoff_data_export import build_template_with_data
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+polars = pytest.importorskip("polars", reason="polars not installed")
 
-# §3 Private Helpers
+# §2 Classes and Sub Classes
+
+# §3 Private Helper Functions
 
 
 def _cell(coord: str, value):
@@ -42,7 +44,9 @@ def _cell(coord: str, value):
     }
 
 
-def _schema(cells: dict[str, dict], *, dims: str = "A1:C3", merges: list[str] | None = None):
+def _schema(
+    cells: dict[str, dict], *, dims: str = "A1:C3", merges: list[str] | None = None
+):
     return {
         "sheets": [
             {
@@ -57,14 +61,11 @@ def _schema(cells: dict[str, dict], *, dims: str = "A1:C3", merges: list[str] | 
     }
 
 
-polars = pytest.importorskip("polars", reason="polars not installed")
-
-
 def _temp_output_path(managed_tmp_dir: Path, name: str) -> Path:
     return managed_tmp_dir / name
 
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_streaming_split_outputs_and_names(managed_tmp_dir: Path):
@@ -153,7 +154,9 @@ def test_streaming_rejects_merged_regions(managed_tmp_dir: Path):
     out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
 
     with pytest.raises(ValueError, match="does not support merged cells"):
-        build_template_with_data(schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming")
+        build_template_with_data(
+            schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming"
+        )
 
 
 def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
@@ -164,7 +167,9 @@ def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
     df = polars.DataFrame({"A": [1.5]})
     out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
 
-    paths = build_template_with_data(schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming")
+    paths = build_template_with_data(
+        schema, {"Sheet1": {"rows": df}}, str(out), export_mode="streaming"
+    )
     wb = openpyxl.load_workbook(paths[0])
     cell = wb["Sheet1"]["A1"]
     assert cell.fill.fgColor.type == "rgb"
@@ -224,12 +229,12 @@ def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
 
     paths = build_template_with_data(
         schema,
-            {
-                "sheet_1": {
-                    "Sheet Name 1": {"name": "Alpha"},
-                    "Sheet Name 2": {"name": "Beta"},
-                }
-            },
+        {
+            "sheet_1": {
+                "Sheet Name 1": {"name": "Alpha"},
+                "Sheet Name 2": {"name": "Beta"},
+            }
+        },
         str(out),
         export_mode="streaming",
         max_rows_per_workbook=10,
@@ -241,3 +246,5 @@ def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
     assert wb["Sheet Name 2"]["A1"].value == "Beta"
     wb.close()
 
+
+# §5 Entrypoints

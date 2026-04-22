@@ -1,12 +1,12 @@
 import json
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
@@ -25,3 +25,6 @@ def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
         sheet["merged_regions"].sort()
 
     assert json.dumps(schema_1, sort_keys=True) == json.dumps(schema_2, sort_keys=True)
+
+
+# §5 Entrypoints

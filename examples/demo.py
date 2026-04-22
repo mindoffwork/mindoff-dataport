@@ -22,7 +22,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import polars as pl
 
-from mindoff_data_export import build_template_with_data, extract_template, get_template_inputs
+from mindoff_data_export import (
+    build_template_with_data,
+    extract_template,
+    get_template_inputs,
+)
 
 EXAMPLES_DIR = Path(__file__).parent
 INPUT_TEMPLATE = EXAMPLES_DIR / "input" / "customer_statement_template.xlsx"

@@ -26,9 +26,11 @@ from .renderer import (
 )
 from .schema import CellSchema, SheetSchema, WorkbookSchema
 
-# §1 Types
+# §1 Constants & Exceptions
 
 MAX_EXCEL_ROWS = 1_048_576
+
+# §2 Classes and Sub Classes
 
 
 @dataclass(frozen=True)
@@ -140,9 +142,7 @@ class _StreamingAnchor:
         return [tuple(row) for row in rows] if rows else None
 
 
-# §2 Constants
-
-# §3 Private Helpers
+# §3 Private Helper Functions
 
 
 def _validate_streaming_modes(
@@ -323,7 +323,11 @@ def _write_sheet_chunk(
             if static is not None:
                 row_cells[idx] = _write_only_cell(ws, static)
 
-        if anchor is not None and anchor is active_anchor and row_idx >= anchor.start_row:
+        if (
+            anchor is not None
+            and anchor is active_anchor
+            and row_idx >= anchor.start_row
+        ):
             if written_data_rows < rows_budget:
                 row_values = anchor.next_row(fetch_chunk_size)
             else:
@@ -433,7 +437,8 @@ def _bundle_parts_if_needed(base_output_path: str, part_paths: list[str]) -> lis
     return [str(zip_path)]
 
 
-# §4 Public API
+# §4 Public Functions
+
 
 def build_template_streaming_with_data(
     schema: WorkbookSchema,
@@ -453,7 +458,9 @@ def build_template_streaming_with_data(
             f"max_rows_per_workbook must be between 1 and {MAX_EXCEL_ROWS}, got {max_rows_per_workbook}"
         )
     if streaming_chunk_rows <= 0:
-        raise ValueError(f"streaming_chunk_rows must be > 0, got {streaming_chunk_rows}")
+        raise ValueError(
+            f"streaming_chunk_rows must be > 0, got {streaming_chunk_rows}"
+        )
 
     plans = _prepare_streaming_plans(
         schema=schema,
@@ -470,7 +477,9 @@ def build_template_streaming_with_data(
         if active_anchor is None and part > 1:
             break
 
-        rows_budget = max_rows_per_workbook - active_anchor.start_row + 1 if active_anchor else 0
+        rows_budget = (
+            max_rows_per_workbook - active_anchor.start_row + 1 if active_anchor else 0
+        )
         if rows_budget <= 0 and active_anchor is not None:
             raise ValueError(
                 f"Anchor '{active_anchor.key}' starts at row {active_anchor.start_row}, "
@@ -509,3 +518,5 @@ def build_template_streaming_with_data(
         output_paths.append(final_path)
     return _bundle_parts_if_needed(output_path, output_paths)
 
+
+# §5 Entrypoints

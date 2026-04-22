@@ -1,4 +1,5 @@
 """Tests for template variable rendering (renderer.py)."""
+
 import datetime
 
 import pytest
@@ -6,9 +7,13 @@ import pytest
 from mindoff_data_export import get_template_inputs, render_schema
 from mindoff_data_export.renderer import _infer_cell_type, _to_rows
 
-# Section 1 Types
+# §1 Constants & Exceptions
 
-# Section 2 Constants
+polars = pytest.importorskip("polars", reason="polars not installed")
+
+# §2 Classes and Sub Classes
+
+# §3 Private Helper Functions
 
 
 def _cell(coord, value):
@@ -53,7 +58,7 @@ def _schema(*sheets):
     return {"sheets": list(sheets)}
 
 
-# Section 4 Public API
+# §4 Public Functions
 
 
 def test_get_template_inputs_returns_sheet_scoped_contract():
@@ -118,7 +123,9 @@ def test_render_schema_static_sheets_use_per_sheet_data():
 
 
 def test_render_schema_expands_dynamic_sheet_name_in_input_order():
-    schema = _schema(_sheet("{{sheet_1}}", {"A1": _cell("A1", "{{customer_name:string}}")}))
+    schema = _schema(
+        _sheet("{{sheet_1}}", {"A1": _cell("A1", "{{customer_name:string}}")})
+    )
 
     result = render_schema(
         schema,
@@ -130,7 +137,10 @@ def test_render_schema_expands_dynamic_sheet_name_in_input_order():
         },
     )
 
-    assert [sheet["name"] for sheet in result["sheets"]] == ["Sheet Name 1", "Sheet Name 3"]
+    assert [sheet["name"] for sheet in result["sheets"]] == [
+        "Sheet Name 1",
+        "Sheet Name 3",
+    ]
     assert result["sheets"][0]["cells"]["A1"]["value"] == "John Doe"
     assert result["sheets"][1]["cells"]["A1"]["value"] == "Jane Doe"
 
@@ -210,12 +220,11 @@ def test_render_schema_raises_for_duplicate_output_sheet_names():
         )
 
 
-polars = pytest.importorskip("polars", reason="polars not installed")
-
-
 def test_render_schema_dataframe_headers_accepts_list_input_with_sheet_scope():
     schema = _schema(
-        _sheet("Sheet 1", {"A1": _cell("A1", "{{hdr:dataframe-headers}}")}, dims="A1:C1")
+        _sheet(
+            "Sheet 1", {"A1": _cell("A1", "{{hdr:dataframe-headers}}")}, dims="A1:C1"
+        )
     )
 
     result = render_schema(schema, {"Sheet 1": {"hdr": ["Item", "Qty", "Price"]}})
@@ -229,7 +238,9 @@ def test_render_schema_dataframe_headers_accepts_list_input_with_sheet_scope():
 def test_render_schema_dataframe_content_no_headers_with_sheet_scope():
     df = polars.DataFrame({"X": [1, 2], "Y": [3, 4]})
     schema = _schema(
-        _sheet("Sheet 1", {"A1": _cell("A1", "{{tbl:dataframe-content}}")}, dims="A1:B2")
+        _sheet(
+            "Sheet 1", {"A1": _cell("A1", "{{tbl:dataframe-content}}")}, dims="A1:B2"
+        )
     )
 
     result = render_schema(schema, {"Sheet 1": {"tbl": df}})
@@ -246,11 +257,6 @@ def test_render_schema_does_not_mutate_original():
     render_schema(schema, {"Sheet 1": {"x": "changed"}})
 
     assert schema["sheets"][0]["cells"]["A1"]["value"] == "{{x:string}}"
-
-
-# ---------------------------------------------------------------------------
-# _infer_cell_type helper
-# ---------------------------------------------------------------------------
 
 
 def test_infer_cell_type_number():
@@ -275,3 +281,6 @@ def test_to_rows_pandas_or_polars_like_contract():
     cols, rows = _to_rows(df)
     assert cols == ["A", "B"]
     assert rows == [(1, 2)]
+
+
+# §5 Entrypoints

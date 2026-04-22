@@ -1,12 +1,12 @@
 import json
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_extract_returns_workbook_schema(workbook_schema):
@@ -16,7 +16,14 @@ def test_extract_returns_workbook_schema(workbook_schema):
 
 def test_sheet_has_required_keys(workbook_schema):
     sheet = workbook_schema["sheets"][0]
-    for key in ("name", "dimensions", "merged_regions", "column_widths", "row_heights", "cells"):
+    for key in (
+        "name",
+        "dimensions",
+        "merged_regions",
+        "column_widths",
+        "row_heights",
+        "cells",
+    ):
         assert key in sheet, f"Missing key: {key}"
 
 
@@ -110,3 +117,6 @@ def test_row_heights_captured(workbook_schema):
 
 def test_schema_is_json_serializable(workbook_schema):
     json.dumps(workbook_schema)
+
+
+# §5 Entrypoints

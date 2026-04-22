@@ -5,11 +5,11 @@ import pytest
 
 from mindoff_data_export.builder import build_template
 
-# §1 Types
+# §1 Constants & Exceptions
 
-# §2 Constants
+# §2 Classes and Sub Classes
 
-# §3 Private Helpers
+# §3 Private Helper Functions
 
 
 def _minimal_cell(coord, value="Hello"):
@@ -57,7 +57,7 @@ def _build_and_reload(schema, managed_tmp_dir):
     return openpyxl.load_workbook(out)
 
 
-# §4 Public API
+# §4 Public Functions
 
 
 def test_even_columns_applies_uniform_width(managed_tmp_dir):
@@ -153,3 +153,6 @@ def test_fixed_mode_uses_explicit_widths(managed_tmp_dir):
     ws = wb.active
     assert ws.column_dimensions["A"].width == pytest.approx(42.0)
     wb.close()
+
+
+# §5 Entrypoints
