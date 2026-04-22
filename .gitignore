@@ -59,3 +59,4 @@ examples/output/**
 
 # Transient streaming export scratch dirs (created during local/debug runs)
 streaming_*/
+concept/
