@@ -23,7 +23,7 @@ Rules:
 ## 2) Project Snapshot (minimal)
 
 - Package: `mindoff_data_export`
-- Core flow: `extract_template(.xlsx) -> schema -> build_template(.xlsx)`
+- Core flow: `extract_template(.xlsx) -> schema -> build_template_with_data(..., output_path)`
 - Runtime templating: `render_schema`, `build_template_with_data`
 - Main modules:
   - `schema.py` TypedDict schemas
@@ -36,10 +36,13 @@ Rules:
 ## 3) Public API (stable unless explicitly changed)
 
 - `extract_template(path)`
-- `build_template(schema, output_path, **sizing_kwargs)`
 - `build_template_with_data(schema, data, output_path, **sizing_kwargs)`
 - `get_template_inputs(schema)`
 - `render_schema(schema, data)`
+
+Notes:
+- `build_template_with_data` is the only top-level build/export API.
+- Low-level workbook reconstruction remains in `mindoff_data_export.builder.build_template` for internal/testing use.
 
 `build_template_with_data` now supports:
 - `export_mode="fidelity" | "streaming"` (default: fidelity)
@@ -90,7 +93,10 @@ PYTHONPATH=src python -m pytest -q
 ```
 
 Temporary test artifacts:
-- Tests create per-test intermediate folders under the OS temp directory.
+- Tests create per-test intermediate folders under a writable temp root.
+- `tests/conftest.py` auto-falls back to project `.tmp/` if OS temp is not writable.
+- Pytest base temp is set to a unique per-run folder to avoid stale ACL/cleanup collisions on Windows.
+- On Windows/Python 3.13 test runs, `tests/conftest.py` patches `os.mkdir(mode=0o700)` to a safe mode due ACL access errors.
 - Per-test intermediate folders are auto-removed after each test.
 
 Change-scoped first, then broader only if needed:

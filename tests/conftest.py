@@ -1,6 +1,7 @@
-import shutil
+﻿import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,49 @@ import pytest
 
 # Ensure src is on path when running without editable install.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+PROJECT_ROOT = Path(__file__).parent.parent
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_template.xlsx"
 
 # §3 Private Helpers
+
+_ORIGINAL_OS_MKDIR = os.mkdir
+
+
+def _patch_windows_mkdir_mode() -> None:
+    """Work around Python 3.13 Windows ACL behavior for mode 0o700 directories."""
+    if os.name != "nt" or getattr(os.mkdir, "_mindoff_mode_patch", False):
+        return
+
+    def _safe_mkdir(path, mode=0o777, *, dir_fd=None):
+        safe_mode = 0o777 if mode == 0o700 else mode
+        if dir_fd is None:
+            return _ORIGINAL_OS_MKDIR(path, safe_mode)
+        return _ORIGINAL_OS_MKDIR(path, safe_mode, dir_fd=dir_fd)
+
+    _safe_mkdir._mindoff_mode_patch = True
+    os.mkdir = _safe_mkdir
+
+
+def _ensure_writable_temp_root() -> Path:
+    """Use a deterministic project-local temp root for pytest."""
+    fallback_root = PROJECT_ROOT / ".tmp"
+    fallback_root.mkdir(parents=True, exist_ok=True)
+
+    # Keep Python and pytest temp discovery aligned.
+    os.environ["TMP"] = str(fallback_root)
+    os.environ["TEMP"] = str(fallback_root)
+    os.environ["TMPDIR"] = str(fallback_root)
+    tempfile.tempdir = str(fallback_root)
+    return fallback_root
+
+
+def _configure_unique_basetemp(config) -> None:
+    if config.option.basetemp:
+        return
+    temp_root = _ensure_writable_temp_root() / "pytest-runs"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    run_id = f"run-{int(time.time() * 1000)}-{os.getpid()}"
+    config.option.basetemp = str(temp_root / run_id)
 
 
 def _create_fixture() -> None:
@@ -79,6 +120,8 @@ def _create_fixture() -> None:
 
 
 def pytest_configure(config) -> None:
+    _patch_windows_mkdir_mode()
+    _configure_unique_basetemp(config)
     if not FIXTURE_PATH.exists():
         _create_fixture()
 
@@ -99,10 +142,6 @@ def workbook_schema(fixture_path):
 
 
 @pytest.fixture
-def managed_tmp_dir() -> Path:
-    """Create a per-test temporary directory in the OS temp area."""
-    tmp_dir = Path(tempfile.mkdtemp(prefix="mindoff_tmp_"))
-    try:
-        yield tmp_dir
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+def managed_tmp_dir(tmp_path: Path) -> Path:
+    """Provide a pytest-managed per-test temporary directory."""
+    return tmp_path

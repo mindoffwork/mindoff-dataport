@@ -3,7 +3,7 @@
 import openpyxl
 import pytest
 
-from mindoff_data_export import build_template
+from mindoff_data_export.builder import build_template
 
 # §1 Types
 

@@ -1,6 +1,6 @@
 from typing import Any, Literal, overload
 
-from .builder import build_template
+from .builder import build_template as _build_template
 from .extractor import extract_template
 from .renderer import get_template_inputs, render_schema
 from .schema import WorkbookSchema
@@ -80,7 +80,7 @@ def build_template_with_data(
         )
 
     resolved = render_schema(schema, data)
-    build_template(
+    _build_template(
         resolved,
         output_path,
         column_width_mode=column_width_mode,
@@ -92,7 +92,6 @@ def build_template_with_data(
 
 __all__ = [
     "extract_template",
-    "build_template",
     "build_template_with_data",
     "get_template_inputs",
     "render_schema",

@@ -10,7 +10,7 @@ import openpyxl
 
 
 def test_build_creates_file(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -18,7 +18,7 @@ def test_build_creates_file(workbook_schema, managed_tmp_dir):
 
 
 def test_built_file_is_valid_xlsx(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -28,7 +28,7 @@ def test_built_file_is_valid_xlsx(workbook_schema, managed_tmp_dir):
 
 
 def test_merged_cells_reconstructed(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -41,7 +41,7 @@ def test_merged_cells_reconstructed(workbook_schema, managed_tmp_dir):
 
 
 def test_column_width_reconstructed(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -52,7 +52,7 @@ def test_column_width_reconstructed(workbook_schema, managed_tmp_dir):
 
 
 def test_row_height_reconstructed(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -63,7 +63,7 @@ def test_row_height_reconstructed(workbook_schema, managed_tmp_dir):
 
 
 def test_cell_value_reconstructed(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
@@ -74,7 +74,7 @@ def test_cell_value_reconstructed(workbook_schema, managed_tmp_dir):
 
 
 def test_anchor_cell_value_reconstructed(workbook_schema, managed_tmp_dir):
-    from mindoff_data_export import build_template
+    from mindoff_data_export.builder import build_template
 
     out = managed_tmp_dir / "out.xlsx"
     build_template(workbook_schema, str(out))
