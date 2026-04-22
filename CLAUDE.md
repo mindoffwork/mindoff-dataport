@@ -55,7 +55,7 @@ Notes:
 - Use `fgColor` for solid fills.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
-- Streaming limits: no `hug`, no merged-cell output, one `dataframe-content` placeholder per sheet.
+- Streaming limits: no `hug`, one `dataframe-content` placeholder per sheet; merged-cell output is allowed only for static-safe regions outside dataframe-content bounds.
 
 ## 5) Sizing
 
@@ -81,6 +81,7 @@ Behavior:
 - `dataframe-headers` writes headers only.
 - `dataframe-content` writes rows only.
 - Streaming writes `dataframe-content` incrementally.
+- LazyFrame `dataframe-headers` must use schema metadata (no eager `collect()`).
 
 ## 7) Tests
 

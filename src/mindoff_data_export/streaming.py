@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import datetime
+import os
+import shutil
+import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -12,6 +16,7 @@ from openpyxl.utils.cell import (
     column_index_from_string,
     coordinate_from_string,
     get_column_letter,
+    range_boundaries,
 )
 
 from .builder import _build_alignment, _build_border, _build_fill, _build_font
@@ -47,6 +52,7 @@ class _SheetPlan:
     sheet: SheetSchema
     static_cells: dict[tuple[int, int], CellSchema]
     anchors: list["_StreamingAnchor"]
+    safe_merges: list[str]
     min_col: int
     min_row: int
     max_col: int
@@ -99,14 +105,18 @@ class _StreamingAnchor:
                 return None
             rows = self.source.rows()
             self.non_lazy_consumed = True
-            return [tuple(row) for row in rows] if rows else None
+            if not rows:
+                return None
+            return [tuple(row) for row in rows]
 
         if "pandas" in module and "DataFrame" in qualname:
             if self.non_lazy_consumed:
                 return None
             rows = list(self.source.itertuples(index=False))
             self.non_lazy_consumed = True
-            return [tuple(row) for row in rows] if rows else None
+            if not rows:
+                return None
+            return [tuple(row) for row in rows]
 
         raise TypeError(
             f"'{self.key}' expected a polars/pandas DataFrame or LazyFrame, got {type(self.source).__name__}"
@@ -139,7 +149,9 @@ class _StreamingAnchor:
             return self._next_lazy_polars_batch(chunk_size)
 
         rows = batch_df.rows()
-        return [tuple(row) for row in rows] if rows else None
+        if not rows:
+            return None
+        return [tuple(row) for row in rows]
 
 
 # §3 Private Helper Functions
@@ -155,11 +167,6 @@ def _validate_streaming_modes(
             raise ValueError(
                 "Streaming mode does not support 'hug' sizing. Use 'fixed' or 'even', "
                 "or switch to export_mode='fidelity'."
-            )
-        if sheet.get("merged_regions"):
-            raise ValueError(
-                "Streaming mode does not support merged cells. Use export_mode='fidelity' "
-                "for templates with merges."
             )
 
 
@@ -265,10 +272,17 @@ def _plan_sheet(sheet: SheetSchema, sheet_data: dict[str, Any]) -> _SheetPlan:
         raise ValueError(
             "Streaming mode currently supports one dataframe-content placeholder per sheet."
         )
+    anchor = anchors[0] if anchors else None
+    safe_merges = _classify_safe_merges(
+        sheet_name=sheet["name"],
+        merged_regions=sheet.get("merged_regions", []),
+        anchor=anchor,
+    )
     return _SheetPlan(
         sheet=sheet,
         static_cells=static_cells,
         anchors=anchors,
+        safe_merges=safe_merges,
         min_col=min_col,
         min_row=min_row,
         max_col=max_col,
@@ -288,6 +302,46 @@ def _headers_from_source(source: Any) -> list[str]:
     raise TypeError(
         f"Expected a polars or pandas DataFrame/LazyFrame, got {type(source).__name__}"
     )
+
+
+def _ranges_intersect(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> bool:
+    a_min_col, a_min_row, a_max_col, a_max_row = a
+    b_min_col, b_min_row, b_max_col, b_max_row = b
+    return (
+        a_min_col <= b_max_col
+        and a_max_col >= b_min_col
+        and a_min_row <= b_max_row
+        and a_max_row >= b_min_row
+    )
+
+
+def _classify_safe_merges(
+    *,
+    sheet_name: str,
+    merged_regions: list[str],
+    anchor: _StreamingAnchor | None,
+) -> list[str]:
+    if not merged_regions:
+        return []
+    if anchor is None:
+        return list(merged_regions)
+
+    anchor_max_col = anchor.start_col + max(len(anchor.columns) - 1, 0)
+    anchor_bounds = (anchor.start_col, anchor.start_row, anchor_max_col, MAX_EXCEL_ROWS)
+    safe_merges: list[str] = []
+
+    for merge_range in merged_regions:
+        merge_bounds = range_boundaries(merge_range)
+        if _ranges_intersect(merge_bounds, anchor_bounds):
+            raise ValueError(
+                f"Streaming mode merge conflict in sheet '{sheet_name}': merged range "
+                f"'{merge_range}' intersects dataframe-content anchor '{anchor.key}'."
+            )
+        safe_merges.append(merge_range)
+
+    return safe_merges
 
 
 def _first_active_anchor(plans: list[_SheetPlan]) -> _StreamingAnchor | None:
@@ -437,6 +491,123 @@ def _bundle_parts_if_needed(base_output_path: str, part_paths: list[str]) -> lis
     return [str(zip_path)]
 
 
+def _worksheet_xml_paths_by_name(zip_file: ZipFile) -> dict[str, str]:
+    wb_ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rel_id_key = (
+        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    )
+    rel_ns = {"rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
+
+    workbook_root = ET.fromstring(zip_file.read("xl/workbook.xml"))
+    rels_root = ET.fromstring(zip_file.read("xl/_rels/workbook.xml.rels"))
+    target_by_rel_id: dict[str, str] = {}
+    for rel in rels_root.findall("rel:Relationship", rel_ns):
+        rel_id = rel.attrib.get("Id")
+        target = rel.attrib.get("Target")
+        if not rel_id or not target:
+            continue
+        if target.startswith("/"):
+            normalized = target.lstrip("/")
+        elif target.startswith("xl/"):
+            normalized = target
+        else:
+            normalized = f"xl/{target}"
+        target_by_rel_id[rel_id] = normalized
+
+    paths: dict[str, str] = {}
+    sheets = workbook_root.find("main:sheets", wb_ns)
+    if sheets is None:
+        return paths
+
+    for sheet in sheets.findall("main:sheet", wb_ns):
+        name = sheet.attrib.get("name")
+        rel_id = sheet.attrib.get(rel_id_key)
+        if not name or not rel_id:
+            continue
+        target = target_by_rel_id.get(rel_id)
+        if target is not None and target.startswith("xl/worksheets/"):
+            paths[name] = target
+    return paths
+
+
+def _inject_merge_cells_xml(xml_data: bytes, merge_ranges: list[str]) -> bytes:
+    if not merge_ranges:
+        return xml_data
+
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    ns = {"main": main_ns}
+    ET.register_namespace("", main_ns)
+
+    root = ET.fromstring(xml_data)
+    merge_cells = root.find("main:mergeCells", ns)
+    if merge_cells is None:
+        merge_cells = ET.Element(f"{{{main_ns}}}mergeCells")
+        sheet_data = root.find("main:sheetData", ns)
+        if sheet_data is not None:
+            idx = list(root).index(sheet_data)
+            root.insert(idx + 1, merge_cells)
+        else:
+            root.append(merge_cells)
+
+    existing_refs = {
+        node.attrib.get("ref")
+        for node in merge_cells.findall("main:mergeCell", ns)
+        if node.attrib.get("ref")
+    }
+    for merge_range in merge_ranges:
+        if merge_range in existing_refs:
+            continue
+        node = ET.SubElement(merge_cells, f"{{{main_ns}}}mergeCell")
+        node.set("ref", merge_range)
+
+    count = len(merge_cells.findall("main:mergeCell", ns))
+    merge_cells.set("count", str(count))
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _patch_workbook_merges(output_path: str, plans: list[_SheetPlan]) -> None:
+    merges_by_sheet = {
+        plan.sheet["name"]: plan.safe_merges for plan in plans if plan.safe_merges
+    }
+    if not merges_by_sheet:
+        return
+
+    source_path = Path(output_path)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f"{source_path.stem}.", suffix=f"{source_path.suffix}.tmp", dir=source_path.parent
+    )
+    os.close(fd)
+    Path(temp_name).unlink(missing_ok=True)
+    temp_path = Path(temp_name)
+    try:
+        with ZipFile(source_path, mode="r") as src_zip:
+            sheet_xml_by_name = _worksheet_xml_paths_by_name(src_zip)
+            merges_by_xml_path: dict[str, list[str]] = {}
+            for sheet_name, merge_ranges in merges_by_sheet.items():
+                sheet_xml_path = sheet_xml_by_name.get(sheet_name)
+                if sheet_xml_path is not None:
+                    merges_by_xml_path[sheet_xml_path] = merge_ranges
+
+            with ZipFile(temp_path, mode="w", compression=ZIP_DEFLATED) as dst_zip:
+                for zip_info in src_zip.infolist():
+                    merge_ranges = merges_by_xml_path.get(zip_info.filename)
+                    if merge_ranges is not None:
+                        patched = _inject_merge_cells_xml(
+                            src_zip.read(zip_info.filename), merge_ranges
+                        )
+                        dst_zip.writestr(zip_info, patched)
+                        continue
+                    with src_zip.open(zip_info, mode="r") as src_file, dst_zip.open(
+                        zip_info, mode="w"
+                    ) as dst_file:
+                        shutil.copyfileobj(src_file, dst_file, length=1024 * 1024)
+        temp_path.replace(source_path)
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+
+
 # §4 Public Functions
 
 
@@ -503,6 +674,7 @@ def build_template_streaming_with_data(
 
         final_path = _part_path(output_path, part)
         wb.save(final_path)
+        _patch_workbook_merges(final_path, plans)
         output_paths.append(final_path)
         part += 1
 
