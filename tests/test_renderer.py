@@ -1,14 +1,17 @@
 """Tests for template variable rendering (renderer.py)."""
 import datetime
+
 import pytest
 
 from mindoff_data_export import get_template_inputs, render_schema
 from mindoff_data_export.renderer import _infer_cell_type, _to_rows
 
+# §1 Types
 
-# ---------------------------------------------------------------------------
-# Fixtures / helpers
-# ---------------------------------------------------------------------------
+# §2 Constants
+
+
+# §3 Private Helpers
 
 def _cell(coord, value):
     return {
@@ -35,9 +38,7 @@ def _schema(cells_dict, dims="A1:C3"):
     }
 
 
-# ---------------------------------------------------------------------------
-# get_template_inputs
-# ---------------------------------------------------------------------------
+# §4 Public API
 
 def test_get_template_inputs_finds_scalar_placeholders():
     schema = _schema({"A1": _cell("A1", "{{name:string}}"), "B1": _cell("B1", "static")})
@@ -55,6 +56,12 @@ def test_get_template_inputs_finds_multiple_types():
     assert result == {"name": "string", "count": "number", "rows": "dataframe-headers"}
 
 
+def test_get_template_inputs_finds_dataframe_content_type():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")})
+    result = get_template_inputs(schema)
+    assert result == {"rows": "dataframe-content"}
+
+
 def test_get_template_inputs_ignores_legacy_markers():
     # {{key}} and {{table:key}} are legacy; should not appear in output
     schema = _schema({"A1": _cell("A1", "{{legacy}}"), "B1": _cell("B1", "{{table:sales}}")})
@@ -69,7 +76,7 @@ def test_get_template_inputs_ignores_non_string_values():
 
 
 # ---------------------------------------------------------------------------
-# render_schema — scalar substitution
+# render_schema â€” scalar substitution
 # ---------------------------------------------------------------------------
 
 def test_render_schema_replaces_whole_cell_string():
@@ -106,7 +113,7 @@ def test_render_schema_leaves_non_placeholder_cells_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# render_schema — validation errors
+# render_schema â€” validation errors
 # ---------------------------------------------------------------------------
 
 def test_render_schema_raises_keyerror_for_missing_key():
@@ -122,19 +129,19 @@ def test_render_schema_raises_typeerror_for_wrong_type():
 
 
 def test_render_schema_raises_typeerror_for_non_dataframe():
-    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-headers}}")})
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")})
     with pytest.raises(TypeError, match="rows"):
         render_schema(schema, {"rows": [1, 2, 3]})
 
 
 # ---------------------------------------------------------------------------
-# render_schema — dataframe expansion (polars)
+# render_schema â€” dataframe expansion (polars)
 # ---------------------------------------------------------------------------
 
 polars = pytest.importorskip("polars", reason="polars not installed")
 
 
-def test_render_schema_dataframe_headers_writes_header_and_data():
+def test_render_schema_dataframe_headers_writes_headers_only():
     df = polars.DataFrame({"Name": ["Alice", "Bob"], "Age": [30, 25]})
     schema = _schema({"A1": _cell("A1", "{{people:dataframe-headers}}")}, dims="A1:B3")
     result = render_schema(schema, {"people": df})
@@ -145,10 +152,9 @@ def test_render_schema_dataframe_headers_writes_header_and_data():
     assert cells["B1"]["value"] == "Age"
     assert cells["A1"]["font"]["bold"] is True
 
-    # Data rows
-    assert cells["A2"]["value"] == "Alice"
-    assert cells["B2"]["value"] == 30
-    assert cells["A3"]["value"] == "Bob"
+    # No data rows for dataframe-headers
+    assert "A2" not in cells
+    assert "B2" not in cells
 
 
 def test_render_schema_dataframe_headers_not_overwritten_by_empty_template_cells():
@@ -168,9 +174,18 @@ def test_render_schema_dataframe_headers_not_overwritten_by_empty_template_cells
     assert cells["C1"]["value"] == "Unit Price"
 
 
-def test_render_schema_dataframe_data_no_headers():
+def test_render_schema_dataframe_headers_accepts_list_input():
+    schema = _schema({"A1": _cell("A1", "{{hdr:dataframe-headers}}")}, dims="A1:C1")
+    result = render_schema(schema, {"hdr": ["Item", "Qty", "Price"]})
+    cells = result["sheets"][0]["cells"]
+    assert cells["A1"]["value"] == "Item"
+    assert cells["B1"]["value"] == "Qty"
+    assert cells["C1"]["value"] == "Price"
+
+
+def test_render_schema_dataframe_content_no_headers():
     df = polars.DataFrame({"X": [1, 2], "Y": [3, 4]})
-    schema = _schema({"A1": _cell("A1", "{{tbl:dataframe-data}}")}, dims="A1:B2")
+    schema = _schema({"A1": _cell("A1", "{{tbl:dataframe-content}}")}, dims="A1:B2")
     result = render_schema(schema, {"tbl": df})
     cells = result["sheets"][0]["cells"]
 
@@ -180,9 +195,9 @@ def test_render_schema_dataframe_data_no_headers():
     assert cells["A2"]["value"] == 2
 
 
-def test_render_schema_lazyframe_is_collected():
+def test_render_schema_dataframe_content_lazyframe_is_collected():
     lf = polars.DataFrame({"V": [10, 20]}).lazy()
-    schema = _schema({"A1": _cell("A1", "{{vals:dataframe-data}}")}, dims="A1:A2")
+    schema = _schema({"A1": _cell("A1", "{{vals:dataframe-content}}")}, dims="A1:A2")
     result = render_schema(schema, {"vals": lf})
     cells = result["sheets"][0]["cells"]
     assert cells["A1"]["value"] == 10
@@ -191,7 +206,7 @@ def test_render_schema_lazyframe_is_collected():
 
 def test_render_schema_dataframe_inherits_anchor_style():
     df = polars.DataFrame({"Col": ["x"]})
-    anchor = _cell("A1", "{{d:dataframe-data}}")
+    anchor = _cell("A1", "{{d:dataframe-content}}")
     anchor["fill"] = {"bg_color": "FFFF0000"}
     schema = _schema({"A1": anchor})
     result = render_schema(schema, {"d": df})
@@ -200,7 +215,7 @@ def test_render_schema_dataframe_inherits_anchor_style():
 
 def test_render_schema_dimensions_extended_by_dataframe():
     df = polars.DataFrame({"A": list(range(10))})
-    schema = _schema({"A1": _cell("A1", "{{big:dataframe-data}}")}, dims="A1:A1")
+    schema = _schema({"A1": _cell("A1", "{{big:dataframe-content}}")}, dims="A1:A1")
     result = render_schema(schema, {"big": df})
     assert result["sheets"][0]["dimensions"] == "A1:A10"
 
@@ -224,3 +239,4 @@ def test_infer_cell_type_date():
 
 def test_infer_cell_type_none():
     assert _infer_cell_type(None) == "empty"
+

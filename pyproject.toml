@@ -14,7 +14,3 @@ dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mindoff_data_export"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-p no:django"

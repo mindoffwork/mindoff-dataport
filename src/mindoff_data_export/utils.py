@@ -5,6 +5,10 @@ from openpyxl.styles.borders import Side
 
 from .schema import BorderSide
 
+# §1 Types
+
+# §2 Constants
+
 # openpyxl indexed color table (legacy palette)
 _INDEXED_COLORS = [
     "FF000000", "FFFFFFFF", "FFFF0000", "FF00FF00", "FF0000FF", "FFFFFF00",
@@ -20,9 +24,11 @@ _INDEXED_COLORS = [
     "FF993300", "FF993366", "FF333399", "FF333333",
 ]
 
+# §3 Private Helpers
+
 
 def normalize_color(color: Optional[Color]) -> Optional[str]:
-    """Convert openpyxl Color → ARGB hex string, or None."""
+    """Convert openpyxl Color to ARGB hex string, or None."""
     if color is None:
         return None
 
@@ -49,7 +55,7 @@ def normalize_color(color: Optional[Color]) -> Optional[str]:
 
 
 def argb_to_color(argb: Optional[str]) -> Optional[Color]:
-    """Convert ARGB hex string (or theme:index:tint) → openpyxl Color."""
+    """Convert ARGB hex string (or theme:index:tint) to openpyxl Color."""
     if argb is None:
         return None
 
@@ -63,7 +69,7 @@ def argb_to_color(argb: Optional[str]) -> Optional[Color]:
 
 
 def border_side_to_dict(side: Optional[Side]) -> BorderSide:
-    """Convert openpyxl Side → BorderSide dict."""
+    """Convert openpyxl Side to a BorderSide dict."""
     if side is None:
         return {"style": None, "color": None}
     return {
@@ -73,8 +79,11 @@ def border_side_to_dict(side: Optional[Side]) -> BorderSide:
 
 
 def dict_to_border_side(d: BorderSide) -> Side:
-    """Convert BorderSide dict → openpyxl Side."""
+    """Convert BorderSide dict to openpyxl Side."""
     color = argb_to_color(d["color"])
     if color is not None:
         return Side(border_style=d["style"], color=color)
     return Side(border_style=d["style"])
+
+
+# §4 Public API

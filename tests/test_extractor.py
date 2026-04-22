@@ -1,5 +1,12 @@
 import json
-import pytest
+
+# §1 Types
+
+# §2 Constants
+
+# §3 Private Helpers
+
+# §4 Public API
 
 
 def test_extract_returns_workbook_schema(workbook_schema):
@@ -73,7 +80,7 @@ def test_font_bold_italic(workbook_schema):
 def test_fill_color_captured(workbook_schema):
     fill = workbook_schema["sheets"][0]["cells"]["C4"]["fill"]
     assert fill["bg_color"] is not None
-    assert len(fill["bg_color"]) == 8  # ARGB 8-char hex
+    assert len(fill["bg_color"]) == 8
 
 
 def test_borders_captured(workbook_schema):
@@ -102,4 +109,4 @@ def test_row_heights_captured(workbook_schema):
 
 
 def test_schema_is_json_serializable(workbook_schema):
-    json.dumps(workbook_schema)  # must not raise
+    json.dumps(workbook_schema)

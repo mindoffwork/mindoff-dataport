@@ -1,15 +1,20 @@
 import json
 
+# §1 Types
 
-def test_roundtrip_schema_identical(fixture_path, tmp_path):
-    """
-    extract → build → re-extract → schemas must be deeply equal.
-    This is the gold-standard fidelity test.
-    """
+# §2 Constants
+
+# §3 Private Helpers
+
+# §4 Public API
+
+
+def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
+    """extract -> build -> re-extract -> schemas must be deeply equal."""
     from mindoff_data_export import build_template, extract_template
 
     schema_1 = extract_template(fixture_path)
-    built_path = str(tmp_path / "rebuilt.xlsx")
+    built_path = str(managed_tmp_dir / "rebuilt.xlsx")
     build_template(schema_1, built_path)
     schema_2 = extract_template(built_path)
 

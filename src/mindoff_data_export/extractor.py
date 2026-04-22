@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import datetime
-import re
-from typing import Optional
 
 import openpyxl
-from openpyxl.cell.cell import Cell
-from openpyxl.cell.cell import MergedCell
-from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter
+from openpyxl.cell.cell import Cell, MergedCell
+from openpyxl.utils.cell import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .schema import (
@@ -23,24 +20,29 @@ from .schema import (
 )
 from .utils import border_side_to_dict, normalize_color
 
-# Module-level constants for MergedCell stubs — shared safely (never mutated downstream)
+# §1 Types
+
+# §2 Constants
+
+# Shared defaults used for merged-cell stubs (never mutated downstream).
 _EMPTY_BORDER_SIDE: BorderSide = {"style": None, "color": None}
 _EMPTY_FONT: FontSchema = {
-    "name": None, "size": None, "bold": False,
-    "italic": False, "underline": None, "color": None,
+    "name": None,
+    "size": None,
+    "bold": False,
+    "italic": False,
+    "underline": None,
+    "color": None,
 }
 _EMPTY_ALIGNMENT: AlignmentSchema = {"horizontal": None, "vertical": None, "wrap_text": False}
 _EMPTY_BORDERS: CellBorders = {
-    "top": _EMPTY_BORDER_SIDE, "bottom": _EMPTY_BORDER_SIDE,
-    "left": _EMPTY_BORDER_SIDE, "right": _EMPTY_BORDER_SIDE,
+    "top": _EMPTY_BORDER_SIDE,
+    "bottom": _EMPTY_BORDER_SIDE,
+    "left": _EMPTY_BORDER_SIDE,
+    "right": _EMPTY_BORDER_SIDE,
 }
 
-
-def extract_template(path: str) -> WorkbookSchema:
-    """Load .xlsx at path and return a WorkbookSchema dict."""
-    wb = openpyxl.load_workbook(path, data_only=False)
-    return {"sheets": [_extract_sheet(ws) for ws in wb.worksheets]}
-
+# §3 Private Helpers
 
 
 def _extract_sheet(ws: Worksheet) -> SheetSchema:
@@ -74,7 +76,7 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
 
 
 def _build_merge_map(ws: Worksheet) -> dict[str, str]:
-    """Map every coordinate inside merged regions to the anchor coordinate."""
+    """Map each coordinate inside merged regions to its anchor coordinate."""
     result: dict[str, str] = {}
     for merged_range in ws.merged_cells.ranges:
         anchor = merged_range.coord.split(":")[0]
@@ -119,12 +121,11 @@ def _extract_cell(cell: Cell | MergedCell, merge_map: dict[str, str]) -> CellSch
 def _infer_cell_type(cell: Cell) -> CellType:
     if cell.value is None:
         return "empty"
-    dt = cell.data_type
-    if dt == "f":
+    if cell.data_type == "f":
         return "formula"
-    if dt == "n":
+    if cell.data_type == "n":
         return "number"
-    if dt == "d" or isinstance(cell.value, (datetime.datetime, datetime.date)):
+    if cell.data_type == "d" or isinstance(cell.value, (datetime.datetime, datetime.date)):
         return "date"
     return "string"
 
@@ -153,8 +154,7 @@ def _extract_fill(cell: Cell) -> FillSchema:
     fill = cell.fill
     fill_type = getattr(fill, "patternType", None) or getattr(fill, "fill_type", None)
     if fill_type == "solid":
-        color = normalize_color(fill.fgColor)
-        return {"bg_color": color}
+        return {"bg_color": normalize_color(fill.fgColor)}
     return {"bg_color": None}
 
 
@@ -175,3 +175,12 @@ def _extract_borders(cell: Cell) -> CellBorders:
         "left": border_side_to_dict(b.left),
         "right": border_side_to_dict(b.right),
     }
+
+
+# §4 Public API
+
+
+def extract_template(path: str) -> WorkbookSchema:
+    """Load .xlsx at *path* and return a WorkbookSchema dict."""
+    wb = openpyxl.load_workbook(path, data_only=False)
+    return {"sheets": [_extract_sheet(ws) for ws in wb.worksheets]}

@@ -1,18 +1,26 @@
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
-# Ensure src is on path when running without editable install
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# §1 Types
 
+# §2 Constants
+
+# Ensure src is on path when running without editable install.
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_template.xlsx"
 
+# §3 Private Helpers
 
-def _create_fixture():
+
+def _create_fixture() -> None:
     import datetime
+
     import openpyxl
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side, Color
+    from openpyxl.styles import Alignment, Border, Color, Font, PatternFill, Side
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -70,9 +78,12 @@ def _create_fixture():
     wb.save(str(FIXTURE_PATH))
 
 
-def pytest_configure(config):
+def pytest_configure(config) -> None:
     if not FIXTURE_PATH.exists():
         _create_fixture()
+
+
+# §4 Public API
 
 
 @pytest.fixture(scope="session")
@@ -83,4 +94,15 @@ def fixture_path() -> str:
 @pytest.fixture(scope="session")
 def workbook_schema(fixture_path):
     from mindoff_data_export import extract_template
+
     return extract_template(fixture_path)
+
+
+@pytest.fixture
+def managed_tmp_dir() -> Path:
+    """Create a per-test temporary directory in the OS temp area."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="mindoff_tmp_"))
+    try:
+        yield tmp_dir
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -11,9 +11,11 @@ ENV/
 
 # Test and coverage artifacts
 .pytest_cache/
+.pytest_tmp/
 .coverage
 .coverage.*
 htmlcov/
+temp_pytest_workspace/
 
 # Packaging / build artifacts
 build/
@@ -43,6 +45,15 @@ Thumbs.db
 
 # Local tooling
 .claude/
+CLAUDE.md
+AGENTS.md
 
 # Generated example outputs
 examples/output/
+
+# Runtime-generated example artifacts
+examples/output/**
+!examples/output/.gitkeep
+
+# Transient streaming export scratch dirs (created during local/debug runs)
+streaming_*/

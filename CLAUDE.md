@@ -1,162 +1,179 @@
-# mindoff_data_export
+﻿# CLAUDE.md - Canonical Agent Guide (Token-Optimized)
 
-Python package: extract `.xlsx` templates → JSON schema; rebuild `.xlsx` from JSON with exact visual fidelity. Supports template variable placeholders and automatic column/row sizing.
+Purpose: keep prompts short, edits safe, tests focused, and this file always in sync.
 
-## Layout
+## 1) Prompt Contract (lowest-token default)
 
-```
-src/mindoff_data_export/
-  schema.py      TypedDicts (WorkbookSchema, SheetSchema, CellSchema, …)
-  utils.py       normalize_color, argb_to_color, border_side_to_dict, dict_to_border_side
-  extractor.py   extract_template(path) → WorkbookSchema
-  builder.py     build_template(schema, output_path, **sizing_kwargs)
-  renderer.py    get_template_inputs(schema), render_schema(schema, data)
-  __init__.py    re-exports all public API
-tests/
-  conftest.py         session fixtures: fixture_path, workbook_schema; auto-creates sample_template.xlsx
-  test_extractor.py
-  test_builder.py
-  test_roundtrip.py
-  test_sizing.py      column_width_mode / row_height_mode tests
-  test_renderer.py    {{key:type}} placeholder and dataframe expansion tests
-examples/
-  demo.py             end-to-end walkthrough of all four public workflows
-  input/              place .xlsx files here
-  config/             extracted JSON schemas and template JSONs
-  output/             built .xlsx files land here
+Use this compact format for all feature/edit/test requests:
+
+```text
+Task: <one sentence>
+Scope: <files or module>
+Constraints: <compat/perf/api limits>
+Tests: <exact pytest target(s)>
+Done-When: <observable acceptance>
 ```
 
-## Public API
+Rules:
+- Prefer one request = one clear outcome.
+- Avoid repeating repo context already in this file.
+- Ask for diffs + targeted tests, not broad rewrites.
+- If uncertain, choose smallest safe change.
 
-```python
-from mindoff_data_export import (
-    extract_template,
-    build_template,
-    build_template_with_data,
-    get_template_inputs,
-    render_schema,
-)
+## 2) Project Snapshot (minimal)
 
-# 1. Extract
-schema = extract_template("file.xlsx")   # data_only=False — preserves formulas
+- Package: `mindoff_data_export`
+- Core flow: `extract_template(.xlsx) -> schema -> build_template(.xlsx)`
+- Runtime templating: `render_schema`, `build_template_with_data`
+- Main modules:
+  - `schema.py` TypedDict schemas
+  - `extractor.py` xlsx -> schema
+  - `builder.py` schema -> xlsx
+  - `renderer.py` `{{key:type}}` replacement
+  - `streaming.py` bounded-memory export path
+  - `utils.py` color/border helpers
 
-# 2. Rebuild (exact visual fidelity)
-build_template(schema, "out.xlsx")
+## 3) Public API (stable unless explicitly changed)
 
-# 3. Rebuild with automatic sizing (kwargs override per-sheet values)
-build_template(schema, "out.xlsx",
-    column_width_mode="hug",    # "fixed" | "even" | "hug"
-    row_height_mode="even",     # "fixed" | "even" | "hug"
-    default_row_height=20.0,    # used by "even" mode
-    default_column_width=15.0,  # used by "even" mode
-)
+- `extract_template(path)`
+- `build_template(schema, output_path, **sizing_kwargs)`
+- `build_template_with_data(schema, data, output_path, **sizing_kwargs)`
+- `get_template_inputs(schema)`
+- `render_schema(schema, data)`
 
-# 4. Template variables — fill {{key:type}} placeholders at runtime
-inputs = get_template_inputs(schema)   # → {"name": "string", "rows": "dataframe-headers"}
-build_template_with_data(schema, data, "out.xlsx",
-    column_width_mode="hug",
-    row_height_mode="even",
-    default_row_height=20.0,
-)
-```
+`build_template_with_data` now supports:
+- `export_mode="fidelity" | "streaming"` (default: fidelity)
+- `streaming_chunk_rows` and `max_rows_per_workbook` when streaming
+- return type: `None` (fidelity) or `list[str]` (streaming chunk outputs)
 
-## JSON Schema shape
+## 4) Non-Negotiable Invariants
 
-```
-WorkbookSchema { sheets: SheetSchema[] }
-SheetSchema {
-  name, dimensions, merged_regions: str[],
-  column_widths: {col: float}, row_heights: {str(int): float},
-  cells: { coord: CellSchema }
+- `merged_regions` is authoritative during build.
+- Preserve formulas (`data_only=False` behavior).
+- `render_schema` must not mutate input.
+- Use `fgColor` for solid fills.
+- JSON row keys can be `str`; builder converts to `int`.
+- Openpyxl styles are immutable; build new style objects.
+- Streaming mode is intentionally constrained:
+  - no `hug` sizing
+  - no merged-cell output
+  - one `dataframe-content` placeholder per sheet
+  - large `dataframe-content` may split across `*.partNNN.xlsx` files
 
-  # Optional sizing — also settable via build_template kwargs (kwargs take precedence)
-  column_width_mode?: "fixed" | "even" | "hug"   # default "fixed"
-  default_column_width?: float                    # used by "even"
-  row_height_mode?: "fixed" | "even" | "hug"     # default "fixed"
-  default_row_height?: float                      # used by "even"
-}
-CellSchema {
-  coordinate, value, cell_type: string|number|date|formula|empty,
-  number_format, font, fill: {bg_color: ARGB|null},
-  alignment: {horizontal, vertical, wrap_text},
-  borders: {top,bottom,left,right: {style, color: ARGB|null}},
-  merged: bool, merge_anchor: coord|null
-}
-```
+## 5) Sizing Modes
 
-Colors are ARGB hex (`"FF003366"`) or `"theme:<idx>:<tint>"` or `null`.
+- `fixed`: use stored widths/heights.
+- `even`: use defaults (`default_column_width`, `default_row_height`).
+- `hug`: compute from written cell content.
+- Function kwargs override per-sheet schema values.
+- In streaming mode, `hug` is invalid; only `fixed`/`even` are allowed.
 
-## Template variable placeholders
+## 6) Placeholder Types
 
-Cell values in a schema JSON may contain `{{key:type}}` tokens:
+Supported:
+- Scalars: `string`, `number`, `date`
+- Dataframe: `dataframe-headers`, `dataframe-content`
 
-| Placeholder | Type | Behavior |
-|---|---|---|
-| `{{name:string}}` | scalar | inline or whole-cell string substitution |
-| `{{count:number}}` | scalar | whole-cell numeric value |
-| `{{date:date}}` | scalar | whole-cell date value |
-| `{{rows:dataframe-headers}}` | DataFrame | writes column names (bold) then data rows |
-| `{{rows:dataframe-data}}` | DataFrame | writes data rows only (developer controls headers) |
+Behavior:
+- `get_template_inputs` returns `{key: type}`.
+- `render_schema` validates and resolves placeholders.
+- `dataframe-headers` writes header cells only; accepts DataFrame/LazyFrame or list input.
+- `dataframe-content` writes row content only; accepts DataFrame/LazyFrame.
+- In streaming mode, `dataframe-content` is written incrementally (LazyFrame batches first).
 
-- `get_template_inputs(schema)` scans all cells and returns `{key: type}` for every placeholder.
-- `render_schema(schema, data)` validates types (raises `KeyError`/`TypeError`) and returns a resolved schema.
-- `build_template_with_data(schema, data, path, **sizing_kwargs)` renders then builds in one call.
-- polars `DataFrame` and `LazyFrame` and pandas `DataFrame` are all accepted for dataframe types.
+## 7) Test Policy (token-efficient)
 
-## Sizing modes
-
-Controlled via kwargs on `build_template` / `build_template_with_data` (preferred) or as optional fields in `SheetSchema`. kwargs always win.
-
-| Mode | Column behavior | Row behavior |
-|---|---|---|
-| `"fixed"` | uses `column_widths` dict | uses `row_heights` dict |
-| `"even"` | all columns → `default_column_width` (default 15.0) | all rows → `default_row_height` (default 15.0) |
-| `"hug"` | each column fits widest cell (char count × bold factor + 2) | each row height = max font size × 1.5 |
-
-`"hug"` runs after cells are written; `"fixed"` and `"even"` run before.
-
-## Key invariants
-
-- `merged_regions` on SheetSchema is authoritative; builder calls `ws.merge_cells()` **after** writing all cells.
-- Non-anchor merged cells (MergedCell stubs) have no style data; extractor returns empty font/fill/borders for them.
-- Fill: always use `fgColor` for solid fills (`bgColor` is two-color pattern only).
-- Row dimension keys: stored as `str` in JSON, converted to `int` when writing to openpyxl.
-- openpyxl style objects are immutable — always construct new Font/PatternFill/Alignment/Border; never mutate.
-- Load with `data_only=False` to preserve formula strings.
-- `render_schema` never mutates the input schema — always returns new dicts.
-
-## Run tests
+Default command:
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -v
+PYTHONPATH=src python -m pytest -q
 ```
 
-Gold-standard: `test_roundtrip.py::test_roundtrip_schema_identical` — extract → build → re-extract → deep JSON compare.
+Temporary test artifacts:
+- Tests create per-test intermediate folders under the OS temp directory.
+- Per-test intermediate folders are auto-removed after each test.
 
-## Run examples
+Change-scoped first, then broader only if needed:
+1. Run nearest test file(s).
+2. Run roundtrip guard: `tests/test_roundtrip.py::test_roundtrip_schema_identical`.
+3. Run full suite if behavior touched multiple modules.
+
+Opt-in heavy checks:
+- None.
+
+## 8) Auto-Update Policy (mandatory for all agents)
+
+When any change affects behavior, API, schema, placeholder rules, sizing logic, or tests, the agent MUST update this `CLAUDE.md` in the same change set.
+
+Required update checklist:
+1. Update relevant section(s) above.
+2. Keep wording compact; remove stale lines.
+3. If new behavior is temporary/experimental, label it clearly.
+4. Ensure examples/tests mentioned here still exist.
+
+Fail condition:
+- A PR/edit that changes behavior but leaves `CLAUDE.md` stale is incomplete.
+
+## 9) Feature/Edit/Test Execution Order
+
+1. Read target module + nearest tests.
+2. Implement minimal diff.
+3. Add/adjust tests for behavior.
+4. Run targeted tests.
+5. Update `CLAUDE.md` per Auto-Update Policy.
+6. Run roundtrip guard if serialization/build path changed.
+
+## 10) Reference Commands
 
 ```bash
+# targeted
+PYTHONPATH=src python -m pytest -q tests/test_renderer.py
+
+# roundtrip guard
+PYTHONPATH=src python -m pytest -q tests/test_roundtrip.py::test_roundtrip_schema_identical
+
+# examples
 python examples/demo.py
 ```
 
-Outputs land in `examples/output/`. Template placeholders are defined in `examples/config/report_template.json`.
+## 11) Code Organization Philosophy (sectioned, grep-friendly)
 
-## Adding features
+Use numbered `§` section comments inside Python modules so structure is predictable and easy to reference in reviews.
 
-When extending the schema (new cell properties, sheet-level properties, etc.):
-1. Add/update TypedDicts in `schema.py`
-2. Add extraction logic in `extractor.py` (mind MergedCell stub edge case)
-3. Add reconstruction logic in `builder.py`
-4. Add rendering logic in `renderer.py` if new placeholder types are involved
-5. Update `tests/conftest.py` fixture if new properties need coverage
-6. Add test assertions; ensure roundtrip test still passes
-7. Update `examples/demo.py` to reflect the change
-8. Update this file
+Module order:
+1. Imports
+2. `# §1 Types` (TypedDict, Protocol, aliases, dataclasses)
+3. `# §2 Constants`
+4. `# §3 Private Helpers`
+5. `# §4 Public API` (exported functions/classes)
 
-## Dependencies
+Rules:
+- Keep this order for `src/` and `tests/` modules when practical.
+- Use subsection comments only for non-trivial logic (example: `# §3.1 Normalize color token`).
+- Prefer small, targeted files; extract helpers only when readability clearly improves.
+- Cross-reference as: `builder.py §3` or `renderer.py §4.2`.
 
-- `openpyxl>=3.1.0` — only xlsx library used
-- `polars` or `pandas` — optional; required only when using dataframe placeholder types
-- `pytest>=8.0`, `pytest-cov>=5.0` (dev)
-- Build backend: `hatchling`
-- Python `>=3.10`
+## 12) Commit Message Guidelines
+
+Use gitmoji codes in commit subjects that match the change type. Keep the text short and action-oriented. Favor clarity over creativity. Keep subject <= 72 chars.
+
+Format:
+
+```text
+:<gitmoji>: <Imperative summary>
+```
+
+Recommended mappings:
+- `feat` -> `:sparkles:`
+- `fix` -> `:bug:`
+- `refactor` -> `:recycle:`
+- `test` -> `:test_tube:`
+- `docs` -> `:memo:`
+- `chore` -> `:wrench:`
+
+Examples:
+- `:sparkles: Add bulk update validation`
+- `:bug: Fix merged border regression`
+- `:test_tube: Add renderer coverage`
+- `:memo: Update CLAUDE commit rules`
+
