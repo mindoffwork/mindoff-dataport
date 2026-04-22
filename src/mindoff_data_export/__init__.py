@@ -32,6 +32,7 @@ def build_template_with_data(
     export_mode: Literal["fidelity"] = "fidelity",
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_progress: bool = False,
 ) -> None: ...
 
 
@@ -48,6 +49,7 @@ def build_template_with_data(
     export_mode: Literal["streaming"],
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_progress: bool = False,
 ) -> list[str]: ...
 
 
@@ -90,6 +92,7 @@ def build_template_with_data(
     export_mode: Literal["fidelity", "streaming"] = "fidelity",
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_progress: bool = False,
 ) -> None | list[str]:
     """Render placeholders in *schema* with sheet-scoped *data* then build output workbook(s)."""
     if export_mode == "streaming":
@@ -103,6 +106,7 @@ def build_template_with_data(
             default_row_height=default_row_height,
             streaming_chunk_rows=streaming_chunk_rows,
             max_rows_per_workbook=max_rows_per_workbook,
+            streaming_progress=streaming_progress,
         )
     if export_mode != "fidelity":
         raise ValueError(

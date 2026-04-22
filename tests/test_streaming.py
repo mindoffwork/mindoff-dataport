@@ -269,6 +269,29 @@ def test_streaming_lazyframe_headers_do_not_collect(monkeypatch, managed_tmp_dir
     wb.close()
 
 
+def test_streaming_progress_logging_emits_part_and_summary(
+    managed_tmp_dir: Path, capsys
+):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    df = polars.DataFrame({"A": [1, 2, 3]})
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+
+    build_template_with_data(
+        schema,
+        {"Sheet1": {"rows": df}},
+        str(out),
+        export_mode="streaming",
+        streaming_chunk_rows=2,
+        max_rows_per_workbook=2,
+        streaming_progress=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "[streaming] part 1 start:" in captured.out
+    assert "[streaming] part 1 done:" in captured.out
+    assert "[streaming] completed streaming build:" in captured.out
+
+
 def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
     schema = {
         "sheets": [
