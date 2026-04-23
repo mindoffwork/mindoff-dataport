@@ -46,7 +46,6 @@ Notes:
 - `mindoff_data_export.builder.build_template` stays internal/testing only.
 - Current input contract is sheet-scoped data, not flat key/value payloads.
 - Streaming supports `export_mode="fidelity" | "streaming"` and may return `list[str]`.
-- Streaming mode accepts `streaming_progress=True` to emit live part/chunk logs.
 
 ## 4) Invariants
 

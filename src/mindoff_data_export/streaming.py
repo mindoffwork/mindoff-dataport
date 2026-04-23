@@ -74,8 +74,6 @@ class _StreamingAnchor:
     slice_offset: int = 0
     fallback_slice: bool = False
     non_lazy_consumed: bool = False
-    rows_emitted: int = 0
-    batches_loaded: int = 0
 
     def next_row(self, chunk_size: int) -> tuple[Any, ...] | None:
         if self.exhausted:
@@ -85,7 +83,6 @@ class _StreamingAnchor:
             if self.current_batch_idx < len(self.current_batch):
                 row = self.current_batch[self.current_batch_idx]
                 self.current_batch_idx += 1
-                self.rows_emitted += 1
                 return row
 
             self.current_batch = []
@@ -110,7 +107,6 @@ class _StreamingAnchor:
             self.non_lazy_consumed = True
             if not rows:
                 return None
-            self.batches_loaded += 1
             return [tuple(row) for row in rows]
 
         if "pandas" in module and "DataFrame" in qualname:
@@ -120,7 +116,6 @@ class _StreamingAnchor:
             self.non_lazy_consumed = True
             if not rows:
                 return None
-            self.batches_loaded += 1
             return [tuple(row) for row in rows]
 
         raise TypeError(
@@ -134,7 +129,6 @@ class _StreamingAnchor:
             if not rows:
                 return None
             self.slice_offset += len(rows)
-            self.batches_loaded += 1
             return [tuple(row) for row in rows]
 
         if self.batches is None:
@@ -157,7 +151,6 @@ class _StreamingAnchor:
         rows = batch_df.rows()
         if not rows:
             return None
-        self.batches_loaded += 1
         return [tuple(row) for row in rows]
 
 
@@ -357,11 +350,6 @@ def _first_active_anchor(plans: list[_SheetPlan]) -> _StreamingAnchor | None:
             if not anchor.exhausted:
                 return anchor
     return None
-
-
-def _emit_streaming_progress(enabled: bool, message: str) -> None:
-    if enabled:
-        print(f"[streaming] {message}", flush=True)
 
 
 def _write_sheet_chunk(
@@ -634,7 +622,6 @@ def build_template_streaming_with_data(
     default_row_height: float | None = None,
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = MAX_EXCEL_ROWS,
-    streaming_progress: bool = False,
 ) -> list[str]:
     _validate_streaming_modes(schema, column_width_mode, row_height_mode)
     if max_rows_per_workbook <= 0 or max_rows_per_workbook > MAX_EXCEL_ROWS:
@@ -654,13 +641,6 @@ def build_template_streaming_with_data(
         default_column_width=default_column_width,
         default_row_height=default_row_height,
     )
-    _emit_streaming_progress(
-        streaming_progress,
-        (
-            f"prepared {len(plans)} sheet plan(s), chunk_rows={streaming_chunk_rows}, "
-            f"max_rows_per_workbook={max_rows_per_workbook}"
-        ),
-    )
     output_paths: list[str] = []
     part = 1
     while True:
@@ -671,21 +651,6 @@ def build_template_streaming_with_data(
         rows_budget = (
             max_rows_per_workbook - active_anchor.start_row + 1 if active_anchor else 0
         )
-        if active_anchor is not None:
-            _emit_streaming_progress(
-                streaming_progress,
-                (
-                    f"part {part} start: anchor={active_anchor.key}, "
-                    f"rows_emitted_total={active_anchor.rows_emitted}, "
-                    f"batches_loaded_total={active_anchor.batches_loaded}, "
-                    f"rows_budget={rows_budget}"
-                ),
-            )
-        else:
-            _emit_streaming_progress(
-                streaming_progress,
-                f"part {part} start: static-only workbook",
-            )
         if rows_budget <= 0 and active_anchor is not None:
             raise ValueError(
                 f"Anchor '{active_anchor.key}' starts at row {active_anchor.start_row}, "
@@ -693,8 +658,6 @@ def build_template_streaming_with_data(
             )
         wb = openpyxl.Workbook(write_only=True)
         active_written_rows = 0
-        batches_before = active_anchor.batches_loaded if active_anchor else 0
-        rows_before = active_anchor.rows_emitted if active_anchor else 0
         for plan in plans:
             ws = wb.create_sheet(title=plan.sheet["name"])
             _apply_dimensions_write_only(ws, plan.sheet)
@@ -713,20 +676,6 @@ def build_template_streaming_with_data(
         wb.save(final_path)
         _patch_workbook_merges(final_path, plans)
         output_paths.append(final_path)
-        if active_anchor is not None:
-            _emit_streaming_progress(
-                streaming_progress,
-                (
-                    f"part {part} done: wrote_rows={active_written_rows}, "
-                    f"batch_delta={active_anchor.batches_loaded - batches_before}, "
-                    f"row_delta={active_anchor.rows_emitted - rows_before}, "
-                    f"anchor_exhausted={active_anchor.exhausted}, output={final_path}"
-                ),
-            )
-        else:
-            _emit_streaming_progress(
-                streaming_progress, f"part {part} done: output={final_path}"
-            )
         part += 1
 
         if active_anchor is None:
@@ -739,12 +688,7 @@ def build_template_streaming_with_data(
         final_path = _part_path(output_path, 1)
         wb.save(final_path)
         output_paths.append(final_path)
-    bundled = _bundle_parts_if_needed(output_path, output_paths)
-    _emit_streaming_progress(
-        streaming_progress,
-        f"completed streaming build: produced {len(bundled)} file(s) -> {bundled}",
-    )
-    return bundled
+    return _bundle_parts_if_needed(output_path, output_paths)
 
 
 # §5 Entrypoints
