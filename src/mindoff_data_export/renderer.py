@@ -418,7 +418,7 @@ def _to_headers(df_or_headers: Any) -> list[str]:
 
     if "polars" in module:
         if qualname == "LazyFrame":
-            return [str(col) for col in df_or_headers.collect_schema().names()]
+            df_or_headers = df_or_headers.collect()
         return [str(col) for col in df_or_headers.columns]
 
     if "pandas" in module and "DataFrame" in qualname:
