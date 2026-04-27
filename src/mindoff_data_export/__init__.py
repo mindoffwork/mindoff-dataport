@@ -1,16 +1,26 @@
-from typing import Any, Literal, overload
+from __future__ import annotations
 
-from .builder import build_template as _build_template
-from .extractor import extract_template
-from .renderer import get_template_inputs, render_schema
+from typing import Any, Literal
+
+from .bundle import (
+    ParquetSource,
+    ReportBundle,
+    compile_report_bundle as _compile_report_bundle_impl,
+    parquet_source,
+)
+from .extractor import extract_template as _extract_template_impl
+from .renderer import get_template_inputs as _get_template_inputs_impl
 from .schema import WorkbookSchema
-from .streaming import build_template_streaming_with_data
+from .xlsx_renderer import export_report_bundle as _export_report_bundle_impl
 
 __all__ = [
+    "ReportBundle",
+    "ParquetSource",
+    "parquet_source",
     "extract_template",
-    "build_template_with_data",
     "get_template_inputs",
-    "render_schema",
+    "compile_report_bundle",
+    "export_report_bundle",
     "mode",
 ]
 
@@ -18,125 +28,49 @@ __all__ = [
 
 # §2 Classes and Sub Classes
 
-
-@overload
-def build_template_with_data(
-    schema: WorkbookSchema,
-    data: dict[str, Any],
-    output_path: str,
-    *,
-    column_width_mode: str | None = None,
-    row_height_mode: str | None = None,
-    default_column_width: float | None = None,
-    default_row_height: float | None = None,
-    export_mode: Literal["fidelity"] = "fidelity",
-    streaming_chunk_rows: int = 50_000,
-    max_rows_per_workbook: int = 1_048_576,
-    streaming_bundle_with_parquet: bool = False,
-) -> None: ...
-
-
-@overload
-def build_template_with_data(
-    schema: WorkbookSchema,
-    data: dict[str, Any],
-    output_path: str,
-    *,
-    column_width_mode: str | None = None,
-    row_height_mode: str | None = None,
-    default_column_width: float | None = None,
-    default_row_height: float | None = None,
-    export_mode: Literal["streaming"],
-    streaming_chunk_rows: int = 50_000,
-    max_rows_per_workbook: int = 1_048_576,
-    streaming_bundle_with_parquet: bool = False,
-) -> list[str]: ...
-
-
 # §3 Private Helper Functions
-
-
-def _build_with_fidelity(
-    schema: WorkbookSchema,
-    data: dict[str, Any],
-    output_path: str,
-    *,
-    column_width_mode: str | None = None,
-    row_height_mode: str | None = None,
-    default_column_width: float | None = None,
-    default_row_height: float | None = None,
-) -> None:
-    resolved = render_schema(schema, data)
-    _build_template(
-        resolved,
-        output_path,
-        column_width_mode=column_width_mode,
-        row_height_mode=row_height_mode,
-        default_column_width=default_column_width,
-        default_row_height=default_row_height,
-    )
-
 
 # §4 Public Functions
 
 
-def build_template_with_data(
-    schema: WorkbookSchema,
+def extract_template(path: str) -> WorkbookSchema:
+    return _extract_template_impl(path)
+
+
+def get_template_inputs(template: WorkbookSchema) -> dict[str, Any]:
+    return _get_template_inputs_impl(template)
+
+
+def compile_report_bundle(
+    template: WorkbookSchema,
     data: dict[str, Any],
+    bundle_path: str | None = None,
+) -> ReportBundle:
+    return _compile_report_bundle_impl(template, data, bundle_path=bundle_path)
+
+
+def export_report_bundle(
+    bundle_or_path: ReportBundle | str,
     output_path: str,
-    *,
-    column_width_mode: str | None = None,
-    row_height_mode: str | None = None,
-    default_column_width: float | None = None,
-    default_row_height: float | None = None,
-    export_mode: Literal["fidelity", "streaming"] = "fidelity",
-    streaming_chunk_rows: int = 50_000,
-    max_rows_per_workbook: int = 1_048_576,
-    streaming_bundle_with_parquet: bool = False,
+    format: Literal["xlsx", "pdf", "image"] = "xlsx",
+    **options: Any,
 ) -> None | list[str]:
-    """Render placeholders in *schema* with sheet-scoped *data* then build output workbook(s)."""
-    if streaming_bundle_with_parquet and export_mode != "streaming":
-        raise ValueError(
-            "streaming_bundle_with_parquet is only supported with export_mode='streaming'."
-        )
-
-    if export_mode == "streaming":
-        return build_template_streaming_with_data(
-            schema=schema,
-            data=data,
-            output_path=output_path,
-            column_width_mode=column_width_mode,
-            row_height_mode=row_height_mode,
-            default_column_width=default_column_width,
-            default_row_height=default_row_height,
-            streaming_chunk_rows=streaming_chunk_rows,
-            max_rows_per_workbook=max_rows_per_workbook,
-            streaming_bundle_with_parquet=streaming_bundle_with_parquet,
-        )
-    if export_mode != "fidelity":
-        raise ValueError(
-            f"Unsupported export_mode '{export_mode}'. Expected 'fidelity' or 'streaming'."
-        )
-
-    _build_with_fidelity(
-        schema=schema,
-        data=data,
-        output_path=output_path,
-        column_width_mode=column_width_mode,
-        row_height_mode=row_height_mode,
-        default_column_width=default_column_width,
-        default_row_height=default_row_height,
+    return _export_report_bundle_impl(
+        bundle_or_path,
+        output_path,
+        format=format,
+        **options,
     )
-    return None
 
 
 class _ModeAPI:
-    """Convenience namespace for a single-import public API."""
+    """Bundle-first public API namespace."""
 
     extract = staticmethod(extract_template)
-    build = staticmethod(build_template_with_data)
-    get_inputs = staticmethod(get_template_inputs)
-    alter_schema = staticmethod(render_schema)
+    inputs = staticmethod(get_template_inputs)
+    compile = staticmethod(compile_report_bundle)
+    export = staticmethod(export_report_bundle)
+    parquet_source = staticmethod(parquet_source)
 
 
 mode = _ModeAPI()

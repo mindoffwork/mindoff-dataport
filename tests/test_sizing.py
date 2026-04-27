@@ -3,7 +3,7 @@
 import openpyxl
 import pytest
 
-from mindoff_data_export.builder import build_template
+from mindoff_data_export import mode
 
 # §1 Constants & Exceptions
 
@@ -53,7 +53,8 @@ def _minimal_sheet(cells_dict, **extra):
 
 def _build_and_reload(schema, managed_tmp_dir):
     out = str(managed_tmp_dir / "out.xlsx")
-    build_template(schema, out)
+    bundle = mode.compile(schema, {"Sheet1": {}})
+    mode.export(bundle, out)
     return openpyxl.load_workbook(out)
 
 

@@ -57,6 +57,7 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
     for row in ws.iter_rows():
         for cell in row:
             cells[cell.coordinate] = _extract_cell(cell, merge_map)
+    _apply_merged_region_borders(ws, cells)
 
     column_widths = {
         col: ws.column_dimensions[col].width
@@ -75,6 +76,7 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
         "merged_regions": merged_regions,
         "column_widths": column_widths,
         "row_heights": row_heights,
+        "show_gridlines": bool(ws.sheet_view.showGridLines),
         "cells": cells,
     }
 
@@ -183,6 +185,55 @@ def _extract_borders(cell: Cell) -> CellBorders:
         "left": border_side_to_dict(b.left),
         "right": border_side_to_dict(b.right),
     }
+
+
+def _apply_merged_region_borders(
+    ws: Worksheet, cells: dict[str, CellSchema]
+) -> None:
+    for merged_range in ws.merged_cells.ranges:
+        anchor = cells.get(merged_range.coord.split(":")[0])
+        if anchor is None:
+            continue
+        borders = {side: dict(value) for side, value in anchor["borders"].items()}
+        edges = {
+            "top": _merged_edge_side(ws, merged_range.min_row, merged_range, "top"),
+            "bottom": _merged_edge_side(
+                ws, merged_range.max_row, merged_range, "bottom"
+            ),
+            "left": _merged_edge_side(ws, merged_range.min_col, merged_range, "left"),
+            "right": _merged_edge_side(
+                ws, merged_range.max_col, merged_range, "right"
+            ),
+        }
+        for side, edge in edges.items():
+            if _has_border(edge):
+                borders[side] = edge
+        anchor["borders"] = borders  # type: ignore[assignment]
+
+
+def _merged_edge_side(
+    ws: Worksheet, edge_index: int, merged_range, side: str
+) -> BorderSide:
+    if side in {"top", "bottom"}:
+        coords = (
+            (edge_index, col)
+            for col in range(merged_range.min_col, merged_range.max_col + 1)
+        )
+    else:
+        coords = (
+            (row, edge_index)
+            for row in range(merged_range.min_row, merged_range.max_row + 1)
+        )
+    for row, col in coords:
+        border_side = getattr(ws.cell(row=row, column=col).border, side)
+        result = border_side_to_dict(border_side)
+        if _has_border(result):
+            return result
+    return dict(_EMPTY_BORDER_SIDE)
+
+
+def _has_border(side: BorderSide) -> bool:
+    return bool(side.get("style"))
 
 
 # §4 Public Functions

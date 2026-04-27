@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import functools
 
-import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill
 from openpyxl.utils.cell import (
     column_index_from_string,
@@ -19,7 +18,6 @@ from .schema import (
     FillSchema,
     FontSchema,
     SheetSchema,
-    WorkbookSchema,
 )
 from .utils import argb_to_color, dict_to_border_side
 
@@ -28,21 +26,6 @@ from .utils import argb_to_color, dict_to_border_side
 # §2 Classes and Sub Classes
 
 # §3 Private Helper Functions
-
-
-def _build_sheet(ws: Worksheet, schema: SheetSchema) -> None:
-    col_mode = schema.get("column_width_mode", "fixed")
-    row_mode = schema.get("row_height_mode", "fixed")
-
-    # fixed/even dimensions are applied before cells; hug runs after cell values exist.
-    _apply_dimensions(ws, schema)
-    _apply_cells(ws, schema)
-    _apply_merges(ws, schema)
-
-    if col_mode == "hug":
-        _apply_hug_columns(ws, schema)
-    if row_mode == "hug":
-        _apply_hug_rows(ws, schema)
 
 
 def _apply_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
@@ -109,13 +92,6 @@ def _apply_hug_rows(ws: Worksheet, schema: SheetSchema) -> None:
         ws.row_dimensions[row_idx].height = max_font_size * 1.5
 
 
-def _apply_cells(ws: Worksheet, schema: SheetSchema) -> None:
-    for coord, cell_schema in schema["cells"].items():
-        cell = ws[coord]
-        _apply_cell_value(cell, cell_schema)
-        _apply_cell_styles(cell, cell_schema)
-
-
 def _apply_cell_value(cell, schema: CellSchema) -> None:
     if schema["cell_type"] == "date" and isinstance(schema["value"], str):
         cell.value = datetime.datetime.fromisoformat(schema["value"])
@@ -130,11 +106,6 @@ def _apply_cell_styles(cell, schema: CellSchema) -> None:
     cell.border = _build_border(schema["borders"])
     if schema["number_format"]:
         cell.number_format = schema["number_format"]
-
-
-def _apply_merges(ws: Worksheet, schema: SheetSchema) -> None:
-    for region_str in schema["merged_regions"]:
-        ws.merge_cells(region_str)
 
 
 def _freeze(d: dict) -> tuple:
@@ -199,39 +170,6 @@ def _build_border(schema: CellBorders) -> Border:
 
 
 # §4 Public Functions
-
-
-def build_template(
-    schema: WorkbookSchema,
-    output_path: str,
-    *,
-    column_width_mode: str | None = None,
-    row_height_mode: str | None = None,
-    default_column_width: float | None = None,
-    default_row_height: float | None = None,
-) -> None:
-    """Reconstruct a workbook from schema and write it to *output_path*."""
-    overrides = {
-        key: value
-        for key, value in {
-            "column_width_mode": column_width_mode,
-            "row_height_mode": row_height_mode,
-            "default_column_width": default_column_width,
-            "default_row_height": default_row_height,
-        }.items()
-        if value is not None
-    }
-
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-
-    for sheet_schema in schema["sheets"]:
-        if overrides:
-            sheet_schema = {**sheet_schema, **overrides}
-        ws = wb.create_sheet(title=sheet_schema["name"])
-        _build_sheet(ws, sheet_schema)
-
-    wb.save(output_path)
 
 
 # §5 Entrypoints

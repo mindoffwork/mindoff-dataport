@@ -24,40 +24,48 @@ Rules:
 ## 2) Project Snapshot
 
 - Package: `mindoff_data_export`
-- Flow: `extract_template(.xlsx) -> schema -> build_template_with_data(..., output_path)`
-- Main modules: `schema.py`, `extractor.py`, `builder.py`, `renderer.py`, `streaming.py`, `utils.py`
+- Flow: `extract_template(.xlsx) -> schema -> compile_report_bundle(...) -> export_report_bundle(...)`
+- Main modules: `schema.py`, `extractor.py`, `bundle.py`, `xlsx_renderer.py`, `pdf_renderer.py`, `builder.py`, `renderer.py`, `utils.py`
 
 ## 3) Public API
 
 Stable unless explicitly changed:
 
 - `extract_template(path)`
-- `build_template_with_data(schema, data, output_path, **sizing_kwargs)`
 - `get_template_inputs(schema)`
-- `render_schema(schema, data)`
+- `compile_report_bundle(template, data, bundle_path=None)`
+- `export_report_bundle(bundle_or_path, output_path, format="xlsx", **options)`
+- `parquet_source(path, *, columns=None, row_count=None)`
 - `mode.extract(path)`
-- `mode.build(schema, data, output_path, **sizing_kwargs)`
-- `mode.get_inputs(schema)`
-- `mode.alter_schema(schema, data)`
+- `mode.inputs(template)`
+- `mode.compile(template, data, bundle_path=None)`
+- `mode.export(bundle_or_path, output_path, format="xlsx", **options)`
 
 Notes:
 
-- `build_template_with_data` is the only top-level build/export API.
-- `mindoff_data_export.builder.build_template` stays internal/testing only.
+- `ReportBundle` directory is the canonical intermediate artifact.
+- `report.json` resolves scalar/static cells and stores dataframe anchors; it must not expand dataframe rows into cell schemas.
+- `pyarrow>=15.0` is required; dataframe sources are stored as `data/*.parquet`.
+- `parquet_source(...)` is the disk-backed input for larger-than-RAM data.
+- `format="xlsx"` and `format="pdf"` are implemented. `format="image"` raises `NotImplementedError`.
+- PDF export uses ReportLab, starts each sheet on a new page, and paginates overflow rows vertically.
+- PDF export supports optional custom TrueType/OpenType fonts via the `fonts` option.
+- PDF export draws only template borders; it must not add a default grid over empty spacer cells.
+- `builder.py` contains XLSX style/sizing helper functions used by `xlsx_renderer.py`.
 - Current input contract is sheet-scoped data, not flat key/value payloads.
-- Streaming supports `export_mode="fidelity" | "streaming"` and may return `list[str]`.
-- Streaming supports optional `streaming_bundle_with_parquet=True` (streaming mode only) to return a single zip bundle with report/data artifacts.
+- XLSX export supports `export_mode="fidelity" | "streaming"` and streaming may return `list[str]`.
 
 ## 4) Invariants
 
 - `merged_regions` is authoritative during build.
+- Merged-cell borders must render around the full merged region, not only the anchor cell.
 - Preserve formulas (`data_only=False`).
-- `render_schema` must not mutate input.
+- Bundle compilation must not mutate input templates.
 - Use `fgColor` for solid fills.
+- Preserve sheet gridline visibility via `show_gridlines`.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
-- Streaming limits: no `hug`, no merged-cell output, one `dataframe-content` placeholder per sheet.
-- Hybrid streaming bundle limits: parquet emission currently supports polars dataframe sources only.
+- Streaming limits: no `hug`, no merged cells intersecting dataframe-content output, one `dataframe-content` placeholder per sheet.
 
 ## 5) Sizing
 
@@ -77,12 +85,13 @@ Supported:
 Behavior:
 
 - `get_template_inputs` returns a sheet-scoped contract.
-- `render_schema` validates per sheet payload.
+- Bundle compilation validates per sheet payload.
 - Sheet order follows template order; dynamic groups follow payload order.
 - Output sheet names must stay unique.
 - `dataframe-headers` writes headers only.
 - `dataframe-content` writes rows only.
-- Streaming writes `dataframe-content` incrementally.
+- Streaming writes `dataframe-content` incrementally from parquet batches.
+- `auto_delete_bundle=True` deletes the bundle directory only after successful export.
 
 ## 7) Tests
 
@@ -115,9 +124,9 @@ Run in order:
 ## 10) Reference Commands
 
 ```bash
-PYTHONPATH=src python -m pytest -q tests/test_renderer.py
+PYTHONPATH=src python -m pytest -q tests/test_bundle.py tests/test_public_api.py
 PYTHONPATH=src python -m pytest -q tests/test_roundtrip.py::test_roundtrip_schema_identical
-python examples/demo.py
+python examples/xlsx_output.py
 ```
 
 ## 11) Code Organization

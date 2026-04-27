@@ -1,5 +1,10 @@
 import json
 
+import openpyxl
+from openpyxl.styles import Border, Side
+
+from mindoff_data_export import extract_template
+
 # §1 Constants & Exceptions
 
 # §2 Classes and Sub Classes
@@ -97,6 +102,25 @@ def test_borders_captured(workbook_schema):
     assert borders["right"]["style"] == "dashed"
 
 
+def test_merged_region_border_is_captured_from_edges(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.merge_cells("A1:B2")
+    sheet["A1"].value = "Merged"
+    sheet["A1"].border = Border(top=Side(style="thin"), left=Side(style="medium"))
+    sheet["B2"].border = Border(bottom=Side(style="thick"), right=Side(style="dashed"))
+    path = managed_tmp_dir / "merged-border.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    borders = schema["sheets"][0]["cells"]["A1"]["borders"]
+    assert borders["top"]["style"] == "thin"
+    assert borders["bottom"]["style"] == "thick"
+    assert borders["left"]["style"] == "medium"
+    assert borders["right"]["style"] == "dashed"
+
+
 def test_alignment_captured(workbook_schema):
     alignment = workbook_schema["sheets"][0]["cells"]["B5"]["alignment"]
     assert alignment["wrap_text"] is True
@@ -107,6 +131,19 @@ def test_column_widths_captured(workbook_schema):
     widths = workbook_schema["sheets"][0]["column_widths"]
     assert "A" in widths
     assert abs(widths["A"] - 20.0) < 0.5
+
+
+def test_sheet_gridline_visibility_captured(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.sheet_view.showGridLines = False
+    sheet["A1"] = "No gridlines"
+    path = managed_tmp_dir / "gridlines.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    assert schema["sheets"][0]["show_gridlines"] is False
 
 
 def test_row_heights_captured(workbook_schema):

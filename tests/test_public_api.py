@@ -1,9 +1,10 @@
 from mindoff_data_export import (
-    build_template_with_data,
+    compile_report_bundle,
+    export_report_bundle,
     extract_template,
     get_template_inputs,
     mode,
-    render_schema,
+    parquet_source,
 )
 
 # §1 Constants & Exceptions
@@ -58,21 +59,28 @@ def _schema() -> dict:
 # §4 Public Functions
 
 
-def test_mode_namespace_exposes_expected_aliases():
+def test_mode_namespace_exposes_bundle_first_aliases():
     assert mode.extract is extract_template
-    assert mode.build is build_template_with_data
-    assert mode.get_inputs is get_template_inputs
-    assert mode.alter_schema is render_schema
+    assert mode.inputs is get_template_inputs
+    assert mode.compile is compile_report_bundle
+    assert mode.export is export_report_bundle
+    assert mode.parquet_source is parquet_source
+    assert not hasattr(mode, "build")
+    assert not hasattr(mode, "alter_schema")
 
 
-def test_mode_renderer_aliases_work():
+def test_mode_bundle_aliases_work(managed_tmp_dir):
     schema = _schema()
 
-    inputs = mode.get_inputs(schema)
+    inputs = mode.inputs(schema)
     assert inputs == {"Sheet1": {"name": "string"}}
 
-    rendered = mode.alter_schema(schema, {"Sheet1": {"name": "Alice"}})
-    assert rendered["sheets"][0]["cells"]["A1"]["value"] == "Alice"
+    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    assert bundle.report["sheets"][0]["cells"]["A1"]["value"] == "Alice"
+
+    output = managed_tmp_dir / "out.xlsx"
+    mode.export(bundle, str(output))
+    assert output.exists()
 
 
 # §5 Entrypoints
