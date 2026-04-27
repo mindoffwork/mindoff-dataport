@@ -46,6 +46,7 @@ Notes:
 - `mindoff_data_export.builder.build_template` stays internal/testing only.
 - Current input contract is sheet-scoped data, not flat key/value payloads.
 - Streaming supports `export_mode="fidelity" | "streaming"` and may return `list[str]`.
+- Streaming supports optional `streaming_bundle_with_parquet=True` (streaming mode only) to return a single zip bundle with report/data artifacts.
 
 ## 4) Invariants
 
@@ -56,6 +57,7 @@ Notes:
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
 - Streaming limits: no `hug`, no merged-cell output, one `dataframe-content` placeholder per sheet.
+- Hybrid streaming bundle limits: parquet emission currently supports polars dataframe sources only.
 
 ## 5) Sizing
 

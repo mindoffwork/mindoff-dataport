@@ -32,6 +32,7 @@ def build_template_with_data(
     export_mode: Literal["fidelity"] = "fidelity",
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_bundle_with_parquet: bool = False,
 ) -> None: ...
 
 
@@ -48,6 +49,7 @@ def build_template_with_data(
     export_mode: Literal["streaming"],
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_bundle_with_parquet: bool = False,
 ) -> list[str]: ...
 
 
@@ -90,8 +92,14 @@ def build_template_with_data(
     export_mode: Literal["fidelity", "streaming"] = "fidelity",
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = 1_048_576,
+    streaming_bundle_with_parquet: bool = False,
 ) -> None | list[str]:
     """Render placeholders in *schema* with sheet-scoped *data* then build output workbook(s)."""
+    if streaming_bundle_with_parquet and export_mode != "streaming":
+        raise ValueError(
+            "streaming_bundle_with_parquet is only supported with export_mode='streaming'."
+        )
+
     if export_mode == "streaming":
         return build_template_streaming_with_data(
             schema=schema,
@@ -103,6 +111,7 @@ def build_template_with_data(
             default_row_height=default_row_height,
             streaming_chunk_rows=streaming_chunk_rows,
             max_rows_per_workbook=max_rows_per_workbook,
+            streaming_bundle_with_parquet=streaming_bundle_with_parquet,
         )
     if export_mode != "fidelity":
         raise ValueError(

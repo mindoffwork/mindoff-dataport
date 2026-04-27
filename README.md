@@ -141,6 +141,7 @@ mode.build(schema, data, "filled.xlsx")
 | `export_mode`           | `Literal["fidelity", "streaming"]`           | Optional (default: `"fidelity"`) | `"fidelity"` writes a single workbook preserving merges/styles. `"streaming"` is optimized for large dataframe-content exports. |
 | `streaming_chunk_rows`  | `int`                                        | Optional (default: `50000`)      | Rows per batch in streaming mode.                                                                                               |
 | `max_rows_per_workbook` | `int`                                        | Optional (default: `1048576`)    | Workbook row cap in streaming mode before splitting into `*.partNNN.xlsx` parts.                                                |
+| `streaming_bundle_with_parquet` | `bool`                               | Optional (default: `False`)      | Streaming-only opt-in to bundle `report/*.xlsx` + `data/*.parquet` + `manifest.json` into one output zip.                    |
 
 Return behavior:
 
@@ -148,6 +149,7 @@ Return behavior:
 - `export_mode="streaming"` returns `list[str]`:
   - single-part export: `[...part001.xlsx]`
   - multi-part export: `[...zip]` (contains `*.partNNN.xlsx` files)
+  - with `streaming_bundle_with_parquet=True`: always `[...zip]`, containing `manifest.json`, `report/*.xlsx`, and `data/*.parquet`
 
 Input strategy:
 
@@ -269,6 +271,7 @@ mode.build(resolved_schema, {"Sheet1": {}}, "exports/quote_22019.xlsx")
 - Choose `export_mode="streaming"` for large `dataframe-content` workloads and chunked output generation.
 - In streaming mode, output may split into multiple workbook parts.
 - When multiple parts are produced, they are bundled into `<output_stem>.zip` and the return value contains that zip path.
+- `streaming_bundle_with_parquet=True` is supported only in streaming mode and currently requires polars-backed dataframe inputs for parquet emission.
 
 ## Demo
 

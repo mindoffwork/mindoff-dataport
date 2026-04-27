@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -245,6 +246,94 @@ def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
     assert wb["Sheet Name 1"]["A1"].value == "Alpha"
     assert wb["Sheet Name 2"]["A1"].value == "Beta"
     wb.close()
+
+
+def test_streaming_bundle_with_parquet_builds_manifest_and_foldered_zip(
+    managed_tmp_dir: Path,
+):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    df = polars.DataFrame({"A": [1, 2, 3, 4, 5]})
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+
+    paths = build_template_with_data(
+        schema,
+        {"Sheet1": {"rows": df}},
+        str(out),
+        export_mode="streaming",
+        streaming_chunk_rows=2,
+        max_rows_per_workbook=3,
+        streaming_bundle_with_parquet=True,
+    )
+
+    assert len(paths) == 1
+    zip_path = Path(paths[0])
+    assert zip_path.name == "filled.zip"
+    assert zip_path.exists()
+
+    with ZipFile(zip_path) as zip_file:
+        names = sorted(zip_file.namelist())
+        assert "manifest.json" in names
+        assert "report/filled.part001.xlsx" in names
+        assert "report/filled.part002.xlsx" in names
+        parquet_names = [name for name in names if name.startswith("data/")]
+        assert len(parquet_names) == 1
+
+        manifest = json.loads(zip_file.read("manifest.json").decode("utf-8"))
+        assert manifest["export_mode"] == "streaming"
+        assert manifest["streaming_bundle_with_parquet"] is True
+        assert manifest["report_files"] == ["filled.part001.xlsx", "filled.part002.xlsx"]
+        assert len(manifest["data_files"]) == 1
+        assert manifest["data_files"][0]["rows"] == 5
+        assert manifest["data_files"][0]["columns"] == ["A"]
+        assert manifest["data_files"][0]["path"] == parquet_names[0]
+
+        zip_file.extractall(path=managed_tmp_dir)
+
+    wb1 = openpyxl.load_workbook(managed_tmp_dir / "report" / "filled.part001.xlsx")
+    wb2 = openpyxl.load_workbook(managed_tmp_dir / "report" / "filled.part002.xlsx")
+    assert [wb1["Sheet1"]["A1"].value, wb1["Sheet1"]["A2"].value, wb1["Sheet1"]["A3"].value] == [1, 2, 3]
+    assert [wb2["Sheet1"]["A1"].value, wb2["Sheet1"]["A2"].value] == [4, 5]
+    wb1.close()
+    wb2.close()
+
+    parquet_df = polars.read_parquet(managed_tmp_dir / manifest["data_files"][0]["path"])
+    assert parquet_df["A"].to_list() == [1, 2, 3, 4, 5]
+
+
+def test_streaming_bundle_with_parquet_rejects_fidelity_mode(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+
+    with pytest.raises(
+        ValueError,
+        match="streaming_bundle_with_parquet is only supported with export_mode='streaming'",
+    ):
+        build_template_with_data(
+            schema,
+            {"Sheet1": {"name": "Alice"}},
+            str(out),
+            export_mode="fidelity",
+            streaming_bundle_with_parquet=True,
+        )
+
+
+def test_streaming_bundle_with_parquet_rejects_non_polars_sources(managed_tmp_dir: Path):
+    pandas = pytest.importorskip("pandas", reason="pandas not installed")
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    out = _temp_output_path(managed_tmp_dir, "filled.xlsx")
+    df = pandas.DataFrame({"A": [1, 2]})
+
+    with pytest.raises(
+        ValueError,
+        match="supports only polars DataFrame/LazyFrame sources",
+    ):
+        build_template_with_data(
+            schema,
+            {"Sheet1": {"rows": df}},
+            str(out),
+            export_mode="streaming",
+            streaming_bundle_with_parquet=True,
+        )
 
 
 # §5 Entrypoints
