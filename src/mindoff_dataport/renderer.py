@@ -20,11 +20,11 @@ from .schema import (
 
 # §1 Constants & Exceptions
 
-# Matches {{key:type}} where type may include hyphens (for example dataframe-headers).
+# Matches {{key:type}} where type may include hyphens (for example dataframe-content).
 PLACEHOLDER_RE = re.compile(r"\{\{(\w+):([\w-]+)\}\}")
 SHEET_NAME_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
-_DATAFRAME_TYPES = frozenset(["dataframe-headers", "dataframe-content"])
+_DATAFRAME_TYPES = frozenset(["dataframe", "dataframe-header", "dataframe-content"])
 _SCALAR_TYPES = frozenset(["string", "number", "int", "float", "date", "boolean"])
 _ALL_TYPES = _SCALAR_TYPES | _DATAFRAME_TYPES
 
@@ -68,11 +68,8 @@ def _validate_data(
 
 
 def _check_type(key: str, value: Any, expected: str) -> None:
-    if expected == "dataframe-content":
+    if expected in _DATAFRAME_TYPES:
         _assert_dataframe(key, value)
-        return
-    if expected == "dataframe-headers":
-        _assert_headers_input(key, value)
         return
 
     type_map: dict[str, tuple] = {
@@ -92,32 +89,11 @@ def _check_type(key: str, value: Any, expected: str) -> None:
 
 def _assert_dataframe(key: str, value: Any) -> None:
     module = getattr(type(value), "__module__", "") or ""
-    if "polars" in module or "pandas" in module:
-        return
-    if _is_parquet_source(value):
-        return
-    raise TypeError(
-        f"'{key}' expected a polars/pandas DataFrame, LazyFrame, or ParquetSource, got {type(value).__name__}"
-    )
-
-
-def _assert_headers_input(key: str, value: Any) -> None:
-    module = getattr(type(value), "__module__", "") or ""
-    if "polars" in module or "pandas" in module:
-        return
-    if _is_parquet_source(value):
-        return
-    if isinstance(value, list):
+    qualname = type(value).__qualname__
+    if "polars" in module and qualname in {"DataFrame", "LazyFrame"}:
         return
     raise TypeError(
-        f"'{key}' expected a polars/pandas DataFrame/LazyFrame, ParquetSource, or list of header values, got {type(value).__name__}"
-    )
-
-
-def _is_parquet_source(value: Any) -> bool:
-    return (
-        getattr(type(value), "__module__", "") == "mindoff_dataport.bundle"
-        and type(value).__qualname__ == "ParquetSource"
+        f"'{key}' expected a polars DataFrame or LazyFrame, got {type(value).__name__}"
     )
 
 
@@ -127,6 +103,9 @@ def _merge_placeholder_types(
     merged: dict[str, str] = dict(base)
     for key, type_ in incoming.items():
         existing = merged.get(key)
+        if existing in _DATAFRAME_TYPES and type_ in _DATAFRAME_TYPES:
+            merged[key] = "dataframe"
+            continue
         if existing is not None and existing != type_:
             raise ValueError(
                 f"Conflicting placeholder types for '{key}' in scope '{scope_label}': "
@@ -148,6 +127,9 @@ def _collect_sheet_placeholders(sheet: SheetSchema) -> dict[str, str]:
             if placeholder_type not in _ALL_TYPES:
                 continue
             existing = found.get(key)
+            if existing in _DATAFRAME_TYPES and placeholder_type in _DATAFRAME_TYPES:
+                found[key] = "dataframe"
+                continue
             if existing is not None and existing != placeholder_type:
                 raise ValueError(
                     f"Conflicting placeholder types for '{key}' in scope '{scope_label}': "
@@ -265,31 +247,18 @@ def _infer_cell_type(value: Any) -> str:
 
 
 def _to_headers(df_or_headers: Any) -> list[str]:
-    """Return header names from DataFrame/LazyFrame or list input."""
+    """Return header names from a polars DataFrame/LazyFrame."""
     module = getattr(type(df_or_headers), "__module__", "") or ""
     qualname = type(df_or_headers).__qualname__
 
     if "polars" in module:
         if qualname == "LazyFrame":
-            df_or_headers = df_or_headers.collect()
-        return [str(col) for col in df_or_headers.columns]
-
-    if "pandas" in module and "DataFrame" in qualname:
-        return [str(col) for col in df_or_headers.columns]
-
-    if _is_parquet_source(df_or_headers):
-        if df_or_headers.columns is not None:
+            return [str(col) for col in df_or_headers.collect_schema().names()]
+        if qualname == "DataFrame":
             return [str(col) for col in df_or_headers.columns]
-        import pyarrow.parquet as pq
-
-        parquet_file = pq.ParquetFile(df_or_headers.path)
-        return [str(col) for col in parquet_file.schema_arrow.names]
-
-    if isinstance(df_or_headers, list):
-        return [str(col) for col in df_or_headers]
 
     raise TypeError(
-        f"Expected a polars/pandas DataFrame/LazyFrame, ParquetSource, or list of headers, got {type(df_or_headers).__name__}"
+        f"Expected a polars DataFrame or LazyFrame, got {type(df_or_headers).__name__}"
     )
 
 

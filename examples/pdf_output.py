@@ -23,7 +23,6 @@ def main() -> None:
 
     schema = mode.extract(str(TEMPLATE_XLSX))
     rows = pl.scan_parquet(DATA_PARQUET)
-    columns = rows.collect_schema().names()
     sheet_name = schema["sheets"][0]["name"]
 
     bundle = mode.compile(
@@ -34,8 +33,8 @@ def main() -> None:
                 "prepared_for": "Mindoff QA",
                 "run_date": dt.date.today(),
                 "status": "Rendering parquet batches to PDF",
-                "line_item_headers": columns,
-                "line_items": mode.parquet_source(str(DATA_PARQUET), columns=columns),
+                "line_item_headers": rows,
+                "line_items": rows,
             }
         },
         bundle_path=str(BUNDLE_DIR),

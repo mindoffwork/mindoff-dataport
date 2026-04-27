@@ -158,7 +158,7 @@ def _render_fidelity(
         for anchor in sheet.get("dataframe_anchors", []):
             anchor_cells = (
                 _header_cells(anchor)
-                if anchor["placeholder_type"] == "dataframe-headers"
+                if anchor["placeholder_type"] == "dataframe-header"
                 else _content_cells(bundle, source_map, anchor, batch_size=50_000)
             )
             for coord, cell_schema in anchor_cells:
@@ -379,7 +379,7 @@ def _streaming_plan(
     static.update(_merged_region_edge_schemas(sheet))
 
     for anchor in sheet.get("dataframe_anchors", []):
-        if anchor["placeholder_type"] == "dataframe-headers":
+        if anchor["placeholder_type"] == "dataframe-header":
             for coord, cell in _header_cells(anchor):
                 row_idx = int("".join(ch for ch in coord if ch.isdigit()))
                 col_idx = column_index_from_string(

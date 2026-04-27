@@ -276,7 +276,7 @@ def _expanded_cells(
     for anchor in sheet.get("dataframe_anchors", []):
         anchor_cells = (
             _header_cells(anchor)
-            if anchor["placeholder_type"] == "dataframe-headers"
+            if anchor["placeholder_type"] == "dataframe-header"
             else _content_cells(
                 bundle,
                 source_map,

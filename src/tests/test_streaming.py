@@ -4,11 +4,9 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import openpyxl
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
-from mindoff_dataport import mode, parquet_source
+from mindoff_dataport import mode
 
 # §1 Constants & Exceptions
 
@@ -118,14 +116,14 @@ def test_streaming_single_part_does_not_zip(managed_tmp_dir: Path):
     assert not (managed_tmp_dir / "filled.zip").exists()
 
 
-def test_streaming_reads_parquet_source_in_batches(managed_tmp_dir: Path):
+def test_streaming_reads_lazyframe_source_in_batches(managed_tmp_dir: Path):
     source_path = managed_tmp_dir / "source.parquet"
-    pq.write_table(pa.table({"A": [1, 2, 3], "B": [4, 5, 6]}), source_path)
+    polars.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6]}).write_parquet(source_path)
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
 
     paths = _export_streaming(
         schema,
-        {"Sheet1": {"rows": parquet_source(str(source_path), columns=["B", "A"])}},
+        {"Sheet1": {"rows": polars.scan_parquet(source_path).select(["B", "A"])}},
         managed_tmp_dir,
         streaming_chunk_rows=1,
         max_rows_per_workbook=10,

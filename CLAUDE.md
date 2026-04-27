@@ -36,7 +36,6 @@ Stable unless explicitly changed:
 - `get_template_inputs(schema)`
 - `compile_report_bundle(template, data, bundle_path=None)`
 - `export_report_bundle(bundle_or_path, output_path, format="xlsx", **options)`
-- `parquet_source(path, *, columns=None, row_count=None)`
 - `mode.extract(path)`
 - `mode.inputs(template)`
 - `mode.compile(template, data, bundle_path=None)`
@@ -47,7 +46,7 @@ Notes:
 - `ReportBundle` directory is the canonical intermediate artifact.
 - `report.json` resolves scalar/static cells and stores dataframe anchors; it must not expand dataframe rows into cell schemas.
 - `pyarrow>=15.0` is required; dataframe sources are stored as `data/*.parquet`.
-- `parquet_source(...)` is the disk-backed input for larger-than-RAM data.
+- Polars `LazyFrame` is the disk-backed input for larger-than-RAM data; use `pl.scan_parquet(...)` for Parquet inputs.
 - `format="xlsx"` and `format="pdf"` are implemented. `format="image"` raises `NotImplementedError`.
 - PDF export uses ReportLab, starts each sheet on a new page, and paginates overflow rows vertically.
 - PDF export supports optional custom TrueType/OpenType fonts via the `fonts` option.
@@ -81,7 +80,7 @@ Notes:
 Supported:
 
 - Scalars: `string`, `number`, `date`
-- Dataframes: `dataframe-headers`, `dataframe-content`
+- Dataframes: `dataframe`, `dataframe-header`, `dataframe-content`
 
 Behavior:
 
@@ -89,7 +88,8 @@ Behavior:
 - Bundle compilation validates per sheet payload.
 - Sheet order follows template order; dynamic groups follow payload order.
 - Output sheet names must stay unique.
-- `dataframe-headers` writes headers only.
+- `dataframe` writes headers at the anchor row and content starting on the next row.
+- `dataframe-header` writes headers only.
 - `dataframe-content` writes rows only.
 - Streaming writes `dataframe-content` incrementally from parquet batches.
 - `auto_delete_bundle=True` deletes the bundle directory only after successful export.

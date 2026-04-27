@@ -29,11 +29,9 @@ from .renderer import (
 from .schema import CellSchema, SheetSchema, WorkbookSchema
 
 __all__ = [
-    "ParquetSource",
     "ReportBundle",
     "compile_report_bundle",
     "load_report_bundle",
-    "parquet_source",
 ]
 
 # Â§1 Constants & Exceptions
@@ -41,15 +39,6 @@ __all__ = [
 BUNDLE_VERSION = "1.0"
 
 # Â§2 Classes and Sub Classes
-
-
-@dataclass(frozen=True)
-class ParquetSource:
-    """Disk-backed dataframe input for larger-than-RAM exports."""
-
-    path: str
-    columns: list[str] | None = None
-    row_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -107,53 +96,10 @@ def _prepare_bundle_dir(bundle_path: str | None) -> Path:
     return path
 
 
-def _resolved_parquet_path(source: ParquetSource) -> Path:
-    path = Path(source.path)
-    if not path.exists():
-        raise FileNotFoundError(f"Parquet source not found: {source.path}")
-    if not path.is_file():
-        raise ValueError(f"Parquet source must be a file: {source.path}")
-    return path.resolve()
-
-
-def _parquet_metadata(source: ParquetSource) -> tuple[list[str], int]:
-    path = _resolved_parquet_path(source)
+def _parquet_metadata(path: Path) -> tuple[list[str], int]:
     parquet_file = pq.ParquetFile(path)
-    available = [str(name) for name in parquet_file.schema_arrow.names]
-    if source.columns is None:
-        columns = available
-    else:
-        columns = [str(col) for col in source.columns]
-        missing = [col for col in columns if col not in available]
-        if missing:
-            raise ValueError(
-                f"Parquet source is missing requested columns: {', '.join(missing)}"
-            )
-    row_count = (
-        source.row_count
-        if source.row_count is not None
-        else parquet_file.metadata.num_rows
-    )
-    if row_count < 0:
-        raise ValueError(f"Parquet source row_count must be non-negative: {row_count}")
-    return columns, int(row_count)
-
-
-def _source_from_dataframe(value: Any) -> tuple[list[str], int]:
-    module = getattr(type(value), "__module__", "") or ""
-    qualname = type(value).__qualname__
-
-    if "polars" in module:
-        if qualname == "LazyFrame":
-            value = value.collect()
-        return [str(col) for col in value.columns], int(value.height)
-
-    if "pandas" in module and "DataFrame" in qualname:
-        return [str(col) for col in value.columns], int(len(value))
-
-    raise TypeError(
-        f"Expected a polars/pandas DataFrame/LazyFrame or ParquetSource, got {type(value).__name__}"
-    )
+    columns = [str(name) for name in parquet_file.schema_arrow.names]
+    return columns, int(parquet_file.metadata.num_rows)
 
 
 def _write_source_file(
@@ -161,37 +107,40 @@ def _write_source_file(
     value: Any,
     source_id: str,
     bundle_dir: Path,
-    source_cache: dict[Path, dict[str, Any]],
+    source_cache: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
-    if isinstance(value, ParquetSource):
-        return _copy_parquet_source(
-            value=value,
-            source_id=source_id,
-            bundle_dir=bundle_dir,
-            source_cache=source_cache,
-        )
-    return _write_dataframe_source(value=value, source_id=source_id, bundle_dir=bundle_dir)
-
-
-def _copy_parquet_source(
-    *,
-    value: ParquetSource,
-    source_id: str,
-    bundle_dir: Path,
-    source_cache: dict[Path, dict[str, Any]],
-) -> dict[str, Any]:
-    input_path = _resolved_parquet_path(value)
-    cached = source_cache.get(input_path)
+    cache_key = id(value)
+    cached = source_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    columns, row_count = _parquet_metadata(value)
+    record = _write_dataframe_source(
+        value=value,
+        source_id=source_id,
+        bundle_dir=bundle_dir,
+    )
+    source_cache[cache_key] = record
+    return record
+
+
+def _write_dataframe_source(
+    *, value: Any, source_id: str, bundle_dir: Path
+) -> dict[str, Any]:
     rel_path = f"data/{source_id}.parquet"
     output_path = bundle_dir / rel_path
-    if input_path != output_path.resolve():
-        with input_path.open("rb") as src, output_path.open("wb") as dst:
-            shutil.copyfileobj(src, dst, length=1024 * 1024)
+    module = getattr(type(value), "__module__", "") or ""
+    qualname = type(value).__qualname__
 
+    if "polars" in module and qualname == "LazyFrame":
+        value.sink_parquet(output_path)
+    elif "polars" in module and qualname == "DataFrame":
+        value.write_parquet(output_path)
+    else:
+        raise TypeError(
+            f"Expected a polars DataFrame or LazyFrame, got {type(value).__name__}"
+        )
+
+    columns, row_count = _parquet_metadata(output_path)
     record = {
         "id": source_id,
         "path": rel_path,
@@ -200,38 +149,7 @@ def _copy_parquet_source(
         "rows": row_count,
         "file_backed": True,
     }
-    source_cache[input_path] = record
     return record
-
-
-def _write_dataframe_source(
-    *, value: Any, source_id: str, bundle_dir: Path
-) -> dict[str, Any]:
-    columns, row_count = _source_from_dataframe(value)
-    rel_path = f"data/{source_id}.parquet"
-    output_path = bundle_dir / rel_path
-    module = getattr(type(value), "__module__", "") or ""
-    qualname = type(value).__qualname__
-
-    if "polars" in module:
-        if qualname == "LazyFrame":
-            value = value.collect()
-        value.write_parquet(output_path)
-    elif "pandas" in module and "DataFrame" in qualname:
-        value.to_parquet(output_path, index=False, engine="pyarrow")
-    else:
-        raise TypeError(
-            f"Expected a polars/pandas DataFrame/LazyFrame, got {type(value).__name__}"
-        )
-
-    return {
-        "id": source_id,
-        "path": rel_path,
-        "format": "parquet",
-        "columns": columns,
-        "rows": row_count,
-        "file_backed": True,
-    }
 
 
 def _schema_value(value: Any) -> Any:
@@ -260,7 +178,7 @@ def _compile_sheet(
     bundle_dir: Path,
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
-    source_cache: dict[Path, dict[str, Any]],
+    source_cache: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
     static_cells: dict[str, CellSchema] = {}
@@ -281,34 +199,69 @@ def _compile_sheet(
             key = full_match.group(1)
             anchor_type = full_match.group(2)
             columns = _to_headers(sheet_data[key])
-            anchor_id = _unique_id(used_ids, f"{output_name}__{key}__{anchor_type}")
-            source_record: dict[str, Any] | None = None
-            if anchor_type == "dataframe-content":
-                source_record = _write_source_file(
-                    value=sheet_data[key],
-                    source_id=anchor_id,
-                    bundle_dir=bundle_dir,
-                    source_cache=source_cache,
-                )
-                if source_record not in data_sources:
-                    data_sources.append(source_record)
-
             col_letter, row_idx = coordinate_from_string(coord)
             col_idx = column_index_from_string(col_letter)
             max_col = max(max_col, col_idx + max(len(columns) - 1, 0))
+
+            if anchor_type == "dataframe-header":
+                anchor_id = _unique_id(used_ids, f"{output_name}__{key}__{anchor_type}")
+                anchors.append(
+                    _dataframe_anchor(
+                        anchor_id=anchor_id,
+                        key=key,
+                        placeholder_type=anchor_type,
+                        coord=coord,
+                        row_idx=row_idx,
+                        col_idx=col_idx,
+                        columns=columns,
+                        source_record=None,
+                        cell=cell,
+                    )
+                )
+                continue
+
+            source_id_type = (
+                "dataframe-content" if anchor_type == "dataframe" else anchor_type
+            )
+            anchor_id = _unique_id(used_ids, f"{output_name}__{key}__{source_id_type}")
+            source_record = _write_source_file(
+                value=sheet_data[key],
+                source_id=anchor_id,
+                bundle_dir=bundle_dir,
+                source_cache=source_cache,
+            )
+            if source_record not in data_sources:
+                data_sources.append(source_record)
+            if anchor_type == "dataframe":
+                header_id = _unique_id(
+                    used_ids, f"{output_name}__{key}__dataframe-header"
+                )
+                anchors.append(
+                    _dataframe_anchor(
+                        anchor_id=header_id,
+                        key=key,
+                        placeholder_type="dataframe-header",
+                        coord=coord,
+                        row_idx=row_idx,
+                        col_idx=col_idx,
+                        columns=columns,
+                        source_record=None,
+                        cell=cell,
+                    )
+                )
+                row_idx += 1
             anchors.append(
-                {
-                    "id": anchor_id,
-                    "key": key,
-                    "placeholder_type": anchor_type,
-                    "coordinate": coord,
-                    "start_row": row_idx,
-                    "start_col": col_idx,
-                    "columns": columns,
-                    "source": source_record["path"] if source_record else None,
-                    "source_format": source_record["format"] if source_record else None,
-                    "cell": cell,
-                }
+                _dataframe_anchor(
+                    anchor_id=anchor_id,
+                    key=key,
+                    placeholder_type="dataframe-content",
+                    coord=coord,
+                    row_idx=row_idx,
+                    col_idx=col_idx,
+                    columns=columns,
+                    source_record=source_record,
+                    cell=cell,
+                )
             )
             continue
 
@@ -328,13 +281,33 @@ def _compile_sheet(
     return result
 
 
+def _dataframe_anchor(
+    *,
+    anchor_id: str,
+    key: str,
+    placeholder_type: str,
+    coord: str,
+    row_idx: int,
+    col_idx: int,
+    columns: list[str],
+    source_record: dict[str, Any] | None,
+    cell: CellSchema,
+) -> dict[str, Any]:
+    return {
+        "id": anchor_id,
+        "key": key,
+        "placeholder_type": placeholder_type,
+        "coordinate": coord,
+        "start_row": row_idx,
+        "start_col": col_idx,
+        "columns": columns,
+        "source": source_record["path"] if source_record else None,
+        "source_format": source_record["format"] if source_record else None,
+        "cell": cell,
+    }
+
+
 # Â§4 Public Functions
-
-
-def parquet_source(
-    path: str, *, columns: list[str] | None = None, row_count: int | None = None
-) -> ParquetSource:
-    return ParquetSource(path=path, columns=columns, row_count=row_count)
 
 
 def compile_report_bundle(
@@ -346,7 +319,7 @@ def compile_report_bundle(
     bundle_dir = _prepare_bundle_dir(bundle_path)
     data_sources: list[dict[str, Any]] = []
     used_ids: set[str] = set()
-    source_cache: dict[Path, dict[str, Any]] = {}
+    source_cache: dict[int, dict[str, Any]] = {}
 
     sheets = [
         _compile_sheet(

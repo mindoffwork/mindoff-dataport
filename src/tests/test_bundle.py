@@ -4,12 +4,10 @@ import json
 from pathlib import Path
 
 import openpyxl
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import reportlab
 
-from mindoff_dataport import mode, parquet_source
+from mindoff_dataport import mode
 from mindoff_dataport.bundle import load_report_bundle
 from mindoff_dataport.pdf_renderer import _FontResolver, _table_style
 
@@ -138,15 +136,15 @@ def test_compile_without_bundle_path_creates_temp_directory():
     assert (path / paths[0]).exists()
 
 
-def test_compile_accepts_parquet_source_without_expanding_rows(managed_tmp_dir: Path):
+def test_compile_accepts_lazyframe_without_collecting_rows(managed_tmp_dir: Path):
     source_path = managed_tmp_dir / "source.parquet"
-    pq.write_table(pa.table({"A": [1, 2], "B": [3, 4]}), source_path)
+    polars.DataFrame({"A": [1, 2], "B": [3, 4]}).write_parquet(source_path)
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "bundle"
 
     bundle = mode.compile(
         schema,
-        {"Sheet1": {"rows": parquet_source(str(source_path), columns=["B", "A"])}},
+        {"Sheet1": {"rows": polars.scan_parquet(source_path).select(["B", "A"])}},
         bundle_path=str(bundle_path),
     )
 
@@ -161,7 +159,7 @@ def test_xlsx_export_uses_bundle_data_without_expanding_report(managed_tmp_dir: 
     schema = _schema(
         {
             "A1": _cell("A1", "{{name:string}}"),
-            "A2": _cell("A2", "{{headers:dataframe-headers}}"),
+            "A2": _cell("A2", "{{headers:dataframe-header}}"),
             "A3": _cell("A3", "{{rows:dataframe-content}}"),
         },
         dims="A1:B3",
@@ -187,6 +185,100 @@ def test_xlsx_export_uses_bundle_data_without_expanding_report(managed_tmp_dir: 
         4,
     ]
     wb.close()
+
+
+def test_dataframe_placeholder_writes_headers_and_content(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe}}")}, dims="A1:B1")
+    df = polars.DataFrame({"A": [1, 2], "B": [3, 4]}).lazy()
+    bundle = mode.compile(schema, {"Sheet1": {"rows": df}})
+
+    anchors = bundle.report["sheets"][0]["dataframe_anchors"]
+    assert [anchor["placeholder_type"] for anchor in anchors] == [
+        "dataframe-header",
+        "dataframe-content",
+    ]
+    assert anchors[0]["start_row"] == 1
+    assert anchors[1]["start_row"] == 2
+
+    out = managed_tmp_dir / "combined.xlsx"
+    paths = mode.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [ws["A1"].value, ws["B1"].value] == ["A", "B"]
+    assert [ws["A2"].value, ws["B2"].value, ws["A3"].value, ws["B3"].value] == [
+        1,
+        3,
+        2,
+        4,
+    ]
+    wb.close()
+
+
+def test_dataframe_header_only_does_not_write_source_file(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-header}}")}, dims="A1:B1")
+    df = polars.DataFrame({"A": [1], "B": [2]}).lazy()
+
+    bundle = mode.compile(schema, {"Sheet1": {"rows": df}})
+
+    assert bundle.manifest["dataframe_sources"] == []
+    anchors = bundle.report["sheets"][0]["dataframe_anchors"]
+    assert len(anchors) == 1
+    assert anchors[0]["placeholder_type"] == "dataframe-header"
+    assert anchors[0]["source"] is None
+
+
+def test_old_dataframe_headers_spelling_is_not_a_placeholder():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-headers}}")}, dims="A1:A1")
+
+    assert mode.inputs(schema) == {"Sheet1": {}}
+
+
+def test_compile_deduplicates_same_lazyframe_object(managed_tmp_dir: Path):
+    source_path = managed_tmp_dir / "source.parquet"
+    polars.DataFrame({"A": [1], "B": [2]}).write_parquet(source_path)
+    rows = polars.scan_parquet(source_path)
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{headers:dataframe-header}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:B2",
+    )
+
+    bundle = mode.compile(schema, {"Sheet1": {"headers": rows, "rows": rows}})
+
+    assert len(bundle.manifest["dataframe_sources"]) == 1
+    content_anchor = [
+        anchor
+        for anchor in bundle.report["sheets"][0]["dataframe_anchors"]
+        if anchor["placeholder_type"] == "dataframe-content"
+    ][0]
+    assert content_anchor["source"] == bundle.manifest["dataframe_sources"][0]["path"]
+
+
+def test_compile_keeps_distinct_lazyframe_objects_separate(managed_tmp_dir: Path):
+    source_path = managed_tmp_dir / "source.parquet"
+    polars.DataFrame({"A": [1], "B": [2]}).write_parquet(source_path)
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{first:dataframe-content}}"),
+            "A3": _cell("A3", "{{second:dataframe-content}}"),
+        },
+        dims="A1:B3",
+    )
+
+    bundle = mode.compile(
+        schema,
+        {
+            "Sheet1": {
+                "first": polars.scan_parquet(source_path),
+                "second": polars.scan_parquet(source_path),
+            }
+        },
+    )
+
+    assert len(bundle.manifest["dataframe_sources"]) == 2
 
 
 def test_export_accepts_bundle_path(managed_tmp_dir: Path):
@@ -269,10 +361,10 @@ def test_export_image_is_reserved(managed_tmp_dir: Path):
 
 def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
     source_path = managed_tmp_dir / "source.parquet"
-    pq.write_table(pa.table({"A": [1, 2], "B": [3, 4]}), source_path)
+    polars.DataFrame({"A": [1, 2], "B": [3, 4]}).write_parquet(source_path)
     schema = _schema(
         {
-            "A1": _cell("A1", "{{headers:dataframe-headers}}"),
+            "A1": _cell("A1", "{{headers:dataframe-header}}"),
             "A2": _cell("A2", "{{rows:dataframe-content}}"),
         },
         dims="A1:B2",
@@ -281,8 +373,8 @@ def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
         schema,
         {
             "Sheet1": {
-                "headers": parquet_source(str(source_path), columns=["B", "A"]),
-                "rows": parquet_source(str(source_path), columns=["B", "A"]),
+                "headers": polars.scan_parquet(source_path).select(["B", "A"]),
+                "rows": polars.scan_parquet(source_path).select(["B", "A"]),
             }
         },
     )

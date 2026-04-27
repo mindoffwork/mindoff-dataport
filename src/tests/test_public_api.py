@@ -1,10 +1,11 @@
+import mindoff_dataport
+
 from mindoff_dataport import (
     compile_report_bundle,
     export_report_bundle,
     extract_template,
     get_template_inputs,
     mode,
-    parquet_source,
 )
 
 # §1 Constants & Exceptions
@@ -64,7 +65,8 @@ def test_mode_namespace_exposes_bundle_first_aliases():
     assert mode.inputs is get_template_inputs
     assert mode.compile is compile_report_bundle
     assert mode.export is export_report_bundle
-    assert mode.parquet_source is parquet_source
+    assert not hasattr(mindoff_dataport, "parquet_source")
+    assert not hasattr(mode, "parquet_source")
     assert not hasattr(mode, "build")
     assert not hasattr(mode, "alter_schema")
 

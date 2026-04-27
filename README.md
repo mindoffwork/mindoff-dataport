@@ -26,12 +26,6 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Optional parquet bundle support:
-
-```bash
-pip install -e ".[parquet]"
-```
-
 Optional demo/dataframe dependency:
 
 ```bash
@@ -96,8 +90,7 @@ mode.export(bundle, "filled.xlsx")
 
 - `manifest.json`: bundle version, inputs, sheet/page metadata, dataframe sources, assets, and output capabilities
 - `report.json`: resolved scalar/static cells plus dataframe anchors
-- `data/*.parquet`: dataframe sources when parquet support is installed
-- `data/*.csv`: fallback dataframe sources without optional parquet dependencies
+- `data/*.parquet`: dataframe sources materialized from Polars DataFrame/LazyFrame inputs
 - `assets/*`: reserved for future image/logo payloads
 
 ## Export Options
@@ -130,7 +123,7 @@ Runtime data is sheet-scoped. Dynamic sheet groups preserve payload order.
 {
     "Sheet1": {
         "customer_name": "Acme Industries",
-        "line_items": dataframe,
+        "line_items": polars_dataframe_or_lazyframe,
     },
     "region_sheet": {
         "North": {"region_name": "North"},
@@ -142,7 +135,9 @@ Runtime data is sheet-scoped. Dynamic sheet groups preserve payload order.
 Supported placeholder types:
 
 - Scalars: `string`, `number`, `int`, `float`, `date`, `boolean`
-- Dataframes: `dataframe-headers`, `dataframe-content`
+- Dataframes: `dataframe`, `dataframe-header`, `dataframe-content`
+
+Use `polars.scan_parquet(path)` when the source data starts as Parquet and should remain lazy until compilation.
 
 ## Demo
 
