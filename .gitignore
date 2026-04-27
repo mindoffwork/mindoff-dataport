@@ -51,13 +51,7 @@ CLAUDE.md
 AGENTS.md
 
 # Generated example outputs
-examples/output/
-examples/data.parquet
-examples/styled_parquet_output*.xlsx
-examples/report_bundle/
-
-# Runtime-generated example artifacts
-examples/output/**
+examples/output/*
 !examples/output/.gitkeep
 
 # Transient streaming export scratch dirs (created during local/debug runs)

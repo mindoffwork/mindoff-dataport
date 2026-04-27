@@ -14,12 +14,14 @@ from mindoff_dataport import mode
 HERE = Path(__file__).resolve().parent
 TEMPLATE_XLSX = HERE / "template.xlsx"
 DATA_PARQUET = HERE / "data.parquet"
-OUTPUT_XLSX = HERE / "styled_parquet_output.xlsx"
-BUNDLE_DIR = HERE / "report_bundle"
+OUTPUT_DIR = HERE / "output"
+OUTPUT_XLSX = OUTPUT_DIR / "styled_parquet_output.xlsx"
+BUNDLE_DIR = OUTPUT_DIR / "report_bundle"
 
 
 def main() -> None:
     started = perf_counter()
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
     schema = mode.extract(str(TEMPLATE_XLSX))
     rows = pl.scan_parquet(DATA_PARQUET)
