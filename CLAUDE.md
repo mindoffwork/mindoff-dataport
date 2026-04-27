@@ -105,7 +105,7 @@ PYTHONPATH=src python -m pytest -q
 Run in order:
 
 1. Nearest test file(s)
-2. `src/mindoff_dataport/test_roundtrip.py::test_roundtrip_schema_identical`
+2. `src/tests/test_roundtrip.py::test_roundtrip_schema_identical`
 3. Full suite only if multiple modules changed
 
 ## 8) Update Policy
@@ -125,8 +125,8 @@ Run in order:
 ## 10) Reference Commands
 
 ```bash
-PYTHONPATH=src python -m pytest -q src/mindoff_dataport/test_bundle.py src/mindoff_dataport/test_public_api.py
-PYTHONPATH=src python -m pytest -q src/mindoff_dataport/test_roundtrip.py::test_roundtrip_schema_identical
+PYTHONPATH=src python -m pytest -q src/tests/test_bundle.py src/tests/test_public_api.py
+PYTHONPATH=src python -m pytest -q src/tests/test_roundtrip.py::test_roundtrip_schema_identical
 python examples/xlsx_output.py
 ```
 
@@ -152,7 +152,7 @@ Use `# §N Name` sections in Python files.
 - Prefer splitting files over overgrowth (> ~500–800 LOC)
 - Use them for meaningful steps like parse, validate, transform, write, batch, finalize.
 - Prefer `# §3.1 Parse sheet metadata` style comments when a phase matters.
-- Keep tests under `src/mindoff_dataport/` aligned with nearby implementation modules when practical.
+- Keep tests under `src/tests/` aligned by test filename with implementation modules when practical.
 - Cross-reference by section label, for example `renderer.py §4.2`.
 
 ## 12) Git Commit Standard
