@@ -1,4 +1,4 @@
-from mindoff_data_export import (
+from mindoff_dataport import (
     compile_report_bundle,
     export_report_bundle,
     extract_template,

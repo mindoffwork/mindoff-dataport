@@ -116,7 +116,7 @@ def _assert_headers_input(key: str, value: Any) -> None:
 
 def _is_parquet_source(value: Any) -> bool:
     return (
-        getattr(type(value), "__module__", "") == "mindoff_data_export.bundle"
+        getattr(type(value), "__module__", "") == "mindoff_dataport.bundle"
         and type(value).__qualname__ == "ParquetSource"
     )
 

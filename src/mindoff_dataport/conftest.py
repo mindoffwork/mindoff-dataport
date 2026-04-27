@@ -8,8 +8,8 @@ import pytest
 # §1 Constants & Exceptions
 
 # Ensure src is on path when running without editable install.
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_template.xlsx"
 _ORIGINAL_OS_MKDIR = os.mkdir
 
@@ -35,7 +35,7 @@ def _patch_windows_mkdir_mode() -> None:
 
 def _ensure_writable_temp_root() -> Path:
     """Prefer OS temp to avoid workspace file-change loops during test discovery."""
-    system_root = Path(tempfile.gettempdir()) / "mindoff_data_export_pytest"
+    system_root = Path(tempfile.gettempdir()) / "mindoff_dataport_pytest"
     try:
         system_root.mkdir(parents=True, exist_ok=True)
         temp_root = system_root
@@ -139,7 +139,7 @@ def fixture_path() -> str:
 
 @pytest.fixture(scope="session")
 def workbook_schema(fixture_path):
-    from mindoff_data_export import extract_template
+    from mindoff_dataport import extract_template
 
     return extract_template(fixture_path)
 

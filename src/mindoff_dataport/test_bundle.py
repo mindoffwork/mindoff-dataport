@@ -9,9 +9,9 @@ import pyarrow.parquet as pq
 import pytest
 import reportlab
 
-from mindoff_data_export import mode, parquet_source
-from mindoff_data_export.bundle import load_report_bundle
-from mindoff_data_export.pdf_renderer import _FontResolver, _table_style
+from mindoff_dataport import mode, parquet_source
+from mindoff_dataport.bundle import load_report_bundle
+from mindoff_dataport.pdf_renderer import _FontResolver, _table_style
 
 # §1 Constants & Exceptions
 

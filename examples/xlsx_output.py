@@ -9,7 +9,7 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from mindoff_data_export import mode
+from mindoff_dataport import mode
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE_XLSX = HERE / "template.xlsx"

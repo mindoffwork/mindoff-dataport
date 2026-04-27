@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from mindoff_data_export import mode, parquet_source
+from mindoff_dataport import mode, parquet_source
 
 # §1 Constants & Exceptions
 

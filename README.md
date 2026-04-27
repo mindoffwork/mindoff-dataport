@@ -1,8 +1,8 @@
-# Mindoff Data Export
+# Mindoff Dataport
 
 Extract Excel templates, compile runtime data into a canonical `ReportBundle`, and export production `.xlsx` files with layout and styling preserved.
 
-Primary entrypoint: `from mindoff_data_export import mode`
+Primary entrypoint: `from mindoff_dataport import mode`
 
 ## What This Library Does
 
@@ -41,7 +41,7 @@ pip install polars
 ## Quick Start
 
 ```python
-from mindoff_data_export import mode
+from mindoff_dataport import mode
 
 template = mode.extract("template.xlsx")
 required_inputs = mode.inputs(template)
@@ -84,7 +84,7 @@ Top-level exports mirror the namespace:
 ## Workflow
 
 ```python
-from mindoff_data_export import mode
+from mindoff_dataport import mode
 
 template = mode.extract("invoice_template.xlsx")
 inputs = mode.inputs(template)

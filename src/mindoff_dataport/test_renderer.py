@@ -4,7 +4,7 @@ import datetime
 
 import pytest
 
-from mindoff_data_export.renderer import _infer_cell_type, get_template_inputs
+from mindoff_dataport.renderer import _infer_cell_type, get_template_inputs
 
 # §1 Constants & Exceptions
 

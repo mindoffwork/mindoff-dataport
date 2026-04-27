@@ -11,7 +11,7 @@ import json
 
 def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
     """extract -> bundle export -> re-extract -> schemas must be deeply equal."""
-    from mindoff_data_export import mode
+    from mindoff_dataport import mode
 
     schema_1 = mode.extract(fixture_path)
     built_path = str(managed_tmp_dir / "rebuilt.xlsx")

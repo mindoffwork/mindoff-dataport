@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mindoff_data_export"
+name = "mindoff_dataport"
 version = "0.1.0"
 description = "Extract and reconstruct .xlsx templates with full visual fidelity"
 requires-python = ">=3.10"
@@ -13,4 +13,4 @@ dependencies = ["openpyxl>=3.1.0", "pyarrow>=15.0", "reportlab>=4.0"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mindoff_data_export"]
+packages = ["src/mindoff_dataport"]

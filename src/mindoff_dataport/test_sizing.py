@@ -3,7 +3,7 @@
 import openpyxl
 import pytest
 
-from mindoff_data_export import mode
+from mindoff_dataport import mode
 
 # §1 Constants & Exceptions
 
