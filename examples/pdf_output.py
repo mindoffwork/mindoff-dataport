@@ -9,7 +9,7 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from mindoff_dataport import mode
+from mindoff_dataport import mode as mo_dataport
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE_XLSX = HERE / "template.xlsx"
@@ -23,11 +23,11 @@ def main() -> None:
     started = perf_counter()
     OUTPUT_DIR.mkdir(exist_ok=True)
 
-    schema = mode.extract(str(TEMPLATE_XLSX))
+    schema = mo_dataport.extract(str(TEMPLATE_XLSX))
     rows = pl.scan_parquet(DATA_PARQUET)
     sheet_name = schema["sheets"][0]["name"]
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             sheet_name: {
@@ -41,7 +41,7 @@ def main() -> None:
         },
         bundle_path=str(BUNDLE_DIR),
     )
-    mode.export(
+    mo_dataport.export(
         bundle,
         str(OUTPUT_PDF),
         format="pdf",

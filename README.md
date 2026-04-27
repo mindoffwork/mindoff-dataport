@@ -1,8 +1,8 @@
 # Mindoff Dataport
 
-Extract Excel templates, compile runtime data into a canonical `ReportBundle`, and export production `.xlsx` files with layout and styling preserved.
+Extract Excel templates, compile runtime data into a canonical `ReportBundle`, and export production `.xlsx` or `.pdf` files with layout and styling preserved.
 
-Primary entrypoint: `from mindoff_dataport import mode`
+Recommended entrypoint: `from mindoff_dataport import mode as mo_dataport`
 
 ## What This Library Does
 
@@ -35,12 +35,12 @@ pip install polars
 ## Quick Start
 
 ```python
-from mindoff_dataport import mode
+from mindoff_dataport import mode as mo_dataport
 
-template = mode.extract("template.xlsx")
-required_inputs = mode.inputs(template)
+template = mo_dataport.extract("template.xlsx")
+required_inputs = mo_dataport.inputs(template)
 
-bundle = mode.compile(
+bundle = mo_dataport.compile(
     template,
     data={
         "Sheet1": {
@@ -51,7 +51,7 @@ bundle = mode.compile(
     bundle_path="report_bundle",
 )
 
-mode.export(
+mo_dataport.export(
     bundle,
     "filled.xlsx",
     format="xlsx",
@@ -62,10 +62,16 @@ mode.export(
 
 ## API Surface
 
-- `mode.extract(path)`
-- `mode.inputs(template)`
-- `mode.compile(template, data, bundle_path=None)`
-- `mode.export(bundle_or_path, output_path, format="xlsx", **options)`
+Import `mode` directly or alias it for readability:
+
+```python
+from mindoff_dataport import mode as mo_dataport
+```
+
+- `mo_dataport.extract(path)`
+- `mo_dataport.inputs(template)`
+- `mo_dataport.compile(template, data, bundle_path=None)`
+- `mo_dataport.export(bundle_or_path, output_path, format="xlsx", **options)`
 
 Top-level exports mirror the namespace:
 
@@ -78,15 +84,15 @@ Top-level exports mirror the namespace:
 ## Workflow
 
 ```python
-from mindoff_dataport import mode
+from mindoff_dataport import mode as mo_dataport
 
-template = mode.extract("invoice_template.xlsx")
-inputs = mode.inputs(template)
-bundle = mode.compile(template, {"Sheet1": {"customer_name": "Acme"}})
-mode.export(bundle, "filled.xlsx")
+template = mo_dataport.extract("invoice_template.xlsx")
+inputs = mo_dataport.inputs(template)
+bundle = mo_dataport.compile(template, {"Sheet1": {"customer_name": "Acme"}})
+mo_dataport.export(bundle, "filled.xlsx")
 ```
 
-`mode.compile(...)` returns an in-memory `ReportBundle`. When `bundle_path` is provided, the same artifact is also written as a directory containing:
+`mo_dataport.compile(...)` returns an in-memory `ReportBundle`. When `bundle_path` is provided, the same artifact is also written as a directory containing:
 
 - `manifest.json`: bundle version, inputs, sheet/page metadata, dataframe sources, assets, and output capabilities
 - `report.json`: resolved scalar/static cells plus dataframe anchors
@@ -95,7 +101,7 @@ mode.export(bundle, "filled.xlsx")
 
 ## Export Options
 
-`mode.export(..., format="xlsx")` supports the current sizing controls:
+`mo_dataport.export(..., format="xlsx")` supports the current sizing controls:
 
 - `column_width_mode`: `"fixed"`, `"even"`, or `"hug"`
 - `row_height_mode`: `"fixed"`, `"even"`, or `"hug"`
@@ -104,7 +110,7 @@ mode.export(bundle, "filled.xlsx")
 - `export_mode`: `"fidelity"` or `"streaming"`
 - `max_rows_per_workbook`
 
-`mode.export(..., format="pdf")` renders each workbook sheet as a styled report page
+`mo_dataport.export(..., format="pdf")` renders each workbook sheet as a styled report page
 that can continue vertically onto additional PDF pages. It supports the same sizing
 overrides plus PDF options:
 
@@ -141,10 +147,19 @@ Use `polars.scan_parquet(path)` when the source data starts as Parquet and shoul
 
 ## Demo
 
+The examples use the tracked workbook fixture at `examples/template.xlsx` and the tracked
+Parquet fixture at `examples/data.parquet`. Generated files are written under
+`examples/output/`, which is ignored by git except for `examples/output/.gitkeep`.
+
 ```bash
 python examples/xlsx_output.py
 python examples/pdf_output.py
 ```
+
+Typical generated outputs:
+
+- `examples/output/styled_parquet_output.part001.xlsx`
+- `examples/output/styled_parquet_output.pdf`
 
 ## Current Scope
 
