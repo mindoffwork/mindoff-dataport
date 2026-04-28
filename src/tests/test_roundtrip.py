@@ -1,12 +1,12 @@
-import json
+﻿import json
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
@@ -28,4 +28,4 @@ def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
     assert json.dumps(schema_1, sort_keys=True) == json.dumps(schema_2, sort_keys=True)
 
 
-# §5 Entrypoints
+# §5. Entrypoints

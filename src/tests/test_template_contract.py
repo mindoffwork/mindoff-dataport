@@ -1,4 +1,4 @@
-"""Tests for template input contracts and payload validation."""
+﻿"""Tests for template input contracts and payload validation."""
 
 import datetime
 
@@ -7,11 +7,11 @@ import pytest
 from mindoff_dataport import mo_dataport
 from mindoff_dataport.template_contract import _infer_cell_type, get_template_inputs
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _cell(coord, value):
@@ -56,7 +56,7 @@ def _schema(*sheets):
     return {"sheets": list(sheets)}
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_get_template_inputs_returns_sheet_scoped_contract():
@@ -345,4 +345,4 @@ def test_infer_cell_type_none():
     assert _infer_cell_type(None) == "empty"
 
 
-# §5 Entrypoints
+# §5. Entrypoints

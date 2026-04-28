@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Literal, Optional, TypedDict
 
@@ -14,9 +14,9 @@ __all__ = [
     "WorkbookSchema",
 ]
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
 CellType = Literal["string", "number", "date", "formula", "empty"]
 
@@ -88,8 +88,8 @@ class WorkbookSchema(TypedDict):
     sheets: list[SheetSchema]
 
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
-# §4 Public Functions
+# §4. Public Functions
 
-# §5 Entrypoints
+# §5. Entrypoints

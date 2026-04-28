@@ -35,11 +35,11 @@ __all__ = [
     "load_report_bundle",
 ]
 
-# Â§1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 BUNDLE_VERSION = "1.0"
 
-# Â§2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class ReportBundle:
         return load_report_bundle(bundle_path)
 
 
-# Â§3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _copy_bundle_dir(bundle: ReportBundle, bundle_path: str) -> None:
@@ -681,7 +681,7 @@ def _dataframe_anchor(
     }
 
 
-# Â§4 Public Functions
+# §4. Public Functions
 
 
 def compile_report_bundle(
@@ -763,4 +763,4 @@ def load_report_bundle(bundle_path: str) -> ReportBundle:
     return ReportBundle(manifest=manifest, report=report, path=str(path))
 
 
-# Â§5 Entrypoints
+# §5. Entrypoints

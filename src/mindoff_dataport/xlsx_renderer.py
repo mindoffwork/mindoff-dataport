@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime
 import shutil
@@ -34,13 +34,13 @@ from .schema import CellSchema, SheetSchema
 
 __all__ = ["export_report_bundle"]
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 MAX_EXCEL_ROWS = 1_048_576
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _coerce_bundle(bundle_or_path: ReportBundle | str) -> ReportBundle:
@@ -903,7 +903,7 @@ def _delete_bundle_dir(bundle: ReportBundle) -> None:
     shutil.rmtree(path)
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def export_report_bundle(
@@ -985,4 +985,4 @@ def export_report_bundle(
     return result
 
 
-# §5 Entrypoints
+# §5. Entrypoints

@@ -1,17 +1,17 @@
-import json
+﻿import json
 
 import openpyxl
 from openpyxl.styles import Border, Side
 
 from mindoff_dataport import extract_template
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_extract_returns_workbook_schema(workbook_schema):
@@ -156,4 +156,4 @@ def test_schema_is_json_serializable(workbook_schema):
     json.dumps(workbook_schema)
 
 
-# §5 Entrypoints
+# §5. Entrypoints

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime
 import json
@@ -12,13 +12,13 @@ from mindoff_dataport import mo_dataport
 from mindoff_dataport.bundle import load_report_bundle
 from mindoff_dataport.pdf_renderer import _FontResolver, _LazyFlowables, _table_style
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 polars = pytest.importorskip("polars", reason="polars not installed")
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _cell(coord: str, value):
@@ -80,7 +80,7 @@ def _vera_font_path() -> str:
     return str(Path(reportlab.__file__).parent / "fonts" / "Vera.ttf")
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_compile_creates_valid_report_bundle_directory(managed_tmp_dir: Path):
@@ -952,4 +952,4 @@ def test_failed_export_preserves_bundle_directory(managed_tmp_dir: Path):
     assert bundle_path.exists()
 
 
-# §5 Entrypoints
+# §5. Entrypoints

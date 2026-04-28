@@ -139,17 +139,17 @@ python examples/xlsx_output.py
 
 ## 11) Code Organization
 
-Use `# §N Name` sections in Python files.
+Use `# §N. Name` sections in Python files.
 
 **Required order:**
 
 1. Imports (stdlib → third-party → local)
 2. Module metadata (`__all__`, `__version__`, etc.)
-3. `# §1 Constants & Exceptions`
-4. `# §2 Classes and Sub Classes`
-5. `# §3 Private Helper Functions`
-6. `# §4 Public Functions`
-7. `# §5 Entrypoints`
+3. `# §1. Constants & Exceptions`
+4. `# §2. Classes and Sub Classes`
+5. `# §3. Private Helper Functions`
+6. `# §4. Public Functions`
+7. `# §5. Entrypoints`
 
 **Rules:**
 

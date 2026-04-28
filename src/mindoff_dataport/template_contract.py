@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime
 import re
@@ -18,7 +18,7 @@ from .schema import (
     WorkbookSchema,
 )
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 # Matches {{key:type}} where type may include hyphens (for example dataframe-content).
 PLACEHOLDER_RE = re.compile(r"\{\{(\w+):([\w-]+)\}\}")
@@ -51,9 +51,9 @@ _DEFAULT_BORDERS: CellBorders = {
     "right": _EMPTY_BORDER_SIDE,
 }
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _validate_data(
@@ -410,7 +410,7 @@ def _parse_dims(dimensions: str) -> tuple[int, int, int, int]:
     )
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def get_template_inputs(schema: WorkbookSchema) -> dict[str, Any]:
@@ -438,4 +438,4 @@ def get_template_inputs(schema: WorkbookSchema) -> dict[str, Any]:
 
     return found
 
-# §5 Entrypoints
+# §5. Entrypoints

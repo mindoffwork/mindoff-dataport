@@ -1,11 +1,11 @@
-from typing import Optional
+﻿from typing import Optional
 
 from openpyxl.styles import Color
 from openpyxl.styles.borders import Side
 
 from .schema import BorderSide
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 # openpyxl indexed color table (legacy palette)
 _INDEXED_COLORS = [
@@ -75,9 +75,9 @@ _INDEXED_COLORS = [
     "FF333333",
 ]
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def normalize_color(color: Optional[Color]) -> Optional[str]:
@@ -139,6 +139,6 @@ def dict_to_border_side(d: BorderSide) -> Side:
     return Side(border_style=d["style"])
 
 
-# §4 Public Functions
+# §4. Public Functions
 
-# §5 Entrypoints
+# §5. Entrypoints

@@ -1,4 +1,4 @@
-import mindoff_dataport
+﻿import mindoff_dataport
 
 from mindoff_dataport import (
     compile_report_bundle,
@@ -8,11 +8,11 @@ from mindoff_dataport import (
     mo_dataport,
 )
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _cell(coord: str, value: str) -> dict:
@@ -57,7 +57,7 @@ def _schema() -> dict:
     }
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_mo_dataport_namespace_exposes_bundle_first_aliases():
@@ -86,4 +86,4 @@ def test_mo_dataport_bundle_aliases_work(managed_tmp_dir):
     assert output.exists()
 
 
-# §5 Entrypoints
+# §5. Entrypoints

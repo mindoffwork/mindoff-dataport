@@ -1,4 +1,4 @@
-"""Tests for column_width_mode and row_height_mode."""
+﻿"""Tests for column_width_mode and row_height_mode."""
 
 import datetime
 
@@ -7,11 +7,11 @@ import pytest
 
 from mindoff_dataport import mo_dataport
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _minimal_cell(coord, value="Hello"):
@@ -60,7 +60,7 @@ def _build_and_reload(schema, managed_tmp_dir):
     return openpyxl.load_workbook(out)
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_even_columns_applies_uniform_width(managed_tmp_dir):
@@ -205,4 +205,4 @@ def test_xlsx_export_preserves_cell_styles_and_date_values(managed_tmp_dir):
     wb.close()
 
 
-# §5 Entrypoints
+# §5. Entrypoints

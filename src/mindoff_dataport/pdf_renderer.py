@@ -32,7 +32,7 @@ from .xlsx_renderer import (
 
 __all__ = ["export_report_bundle"]
 
-# Â§1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 _PAGE_SIZES = {
     "A4": A4,
@@ -56,7 +56,7 @@ _EXCEL_WIDTH_TO_POINTS = 7.0
 _MIN_COLUMN_WIDTH = 24.0
 _MAX_COLUMN_WIDTH = 180.0
 
-# Â§2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
 
 class _FontResolver:
@@ -126,7 +126,7 @@ class _LazyFlowables:
         self._buffer.insert(index, value)
 
 
-# Â§3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _page_size(name: str, orientation: str) -> tuple[float, float]:
@@ -921,7 +921,7 @@ def _ensure_output_parent(output_path: str) -> None:
         parent.mkdir(parents=True, exist_ok=True)
 
 
-# Â§4 Public Functions
+# §4. Public Functions
 
 
 def export_report_bundle(
@@ -977,4 +977,4 @@ def export_report_bundle(
     doc.build(_LazyFlowables(flowables()))
 
 
-# Â§5 Entrypoints
+# §5. Entrypoints

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from zipfile import ZipFile
@@ -8,13 +8,13 @@ import pytest
 
 from mindoff_dataport import mo_dataport
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 polars = pytest.importorskip("polars", reason="polars not installed")
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _cell(coord: str, value):
@@ -67,7 +67,7 @@ def _export_streaming(schema, data, managed_tmp_dir: Path, **options):
     return mo_dataport.export(bundle, str(out), export_mode="streaming", **options)
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def test_streaming_split_outputs_and_names(managed_tmp_dir: Path):
@@ -700,4 +700,4 @@ def test_pdf_renders_sibling_repeat_sections(managed_tmp_dir: Path):
     assert out.read_bytes().startswith(b"%PDF")
 
 
-# §5 Entrypoints
+# §5. Entrypoints

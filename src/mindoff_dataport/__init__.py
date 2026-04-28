@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -25,13 +25,13 @@ __all__ = [
     "mo_dataport",
 ]
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def extract_template(path: str) -> WorkbookSchema:
@@ -77,4 +77,4 @@ mo_dataport = SimpleNamespace(
 )
 
 
-# §5 Entrypoints
+# §5. Entrypoints

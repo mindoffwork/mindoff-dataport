@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime
 import functools
@@ -21,11 +21,11 @@ from .schema import (
 )
 from .style_conversion import argb_to_color, dict_to_border_side
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _apply_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
@@ -169,7 +169,7 @@ def _build_border(schema: CellBorders) -> Border:
     return _cached_border(_freeze(schema))
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
-# §5 Entrypoints
+# §5. Entrypoints

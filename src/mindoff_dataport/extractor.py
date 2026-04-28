@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime
 
@@ -20,7 +20,7 @@ from .schema import (
 )
 from .style_conversion import border_side_to_dict, normalize_color
 
-# §1 Constants & Exceptions
+# §1. Constants & Exceptions
 
 # Shared defaults used for merged-cell stubs (never mutated downstream).
 _EMPTY_BORDER_SIDE: BorderSide = {"style": None, "color": None}
@@ -44,9 +44,9 @@ _EMPTY_BORDERS: CellBorders = {
     "right": _EMPTY_BORDER_SIDE,
 }
 
-# §2 Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# §3 Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _extract_sheet(ws: Worksheet) -> SheetSchema:
@@ -236,7 +236,7 @@ def _has_border(side: BorderSide) -> bool:
     return bool(side.get("style"))
 
 
-# §4 Public Functions
+# §4. Public Functions
 
 
 def extract_template(path: str) -> WorkbookSchema:
@@ -245,4 +245,4 @@ def extract_template(path: str) -> WorkbookSchema:
     return {"sheets": [_extract_sheet(ws) for ws in wb.worksheets]}
 
 
-# §5 Entrypoints
+# §5. Entrypoints
