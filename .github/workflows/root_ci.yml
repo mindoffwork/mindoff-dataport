@@ -8,6 +8,8 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "pytest.ini"
+      - ".github/workflows/root_ci.yml"
+  workflow_dispatch:
 
 concurrency:
   group: root-stability-${{ github.sha }}
