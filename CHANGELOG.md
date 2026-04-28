@@ -14,7 +14,7 @@
 - ♻️ Rename package to mindoff_dataport
 - ♻️ Move tests into src/tests
 - ♻️ Trim examples to core features only
-- ♻️ Flatten mode API to top-level aliases and expand package metadata
+- ♻️ Promote mo_dataport API alias and expand package metadata
 - 🔧 Refresh project setup
 - 🙈 Move example outputs under ignored folder
 

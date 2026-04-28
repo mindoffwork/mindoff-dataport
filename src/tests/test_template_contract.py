@@ -4,7 +4,7 @@ import datetime
 
 import pytest
 
-from mindoff_dataport import mode
+from mindoff_dataport import mo_dataport
 from mindoff_dataport.template_contract import _infer_cell_type, get_template_inputs
 
 # §1 Constants & Exceptions
@@ -226,34 +226,34 @@ def test_compile_rejects_non_dict_root_payload():
     schema = _schema(_sheet("Sheet 1", {"A1": _cell("A1", "{{name:string}}")}))
 
     with pytest.raises(TypeError, match="Data must be an object/dict"):
-        mode.compile(schema, ["not", "a", "dict"])
+        mo_dataport.compile(schema, ["not", "a", "dict"])
 
 
 def test_compile_rejects_missing_sheet_payload():
     schema = _schema(_sheet("Sheet 1", {"A1": _cell("A1", "{{name:string}}")}))
 
     with pytest.raises(KeyError, match="requires sheet 'Sheet 1'"):
-        mode.compile(schema, {})
+        mo_dataport.compile(schema, {})
 
 
 def test_compile_rejects_non_dict_sheet_payload():
     schema = _schema(_sheet("Sheet 1", {"A1": _cell("A1", "{{name:string}}")}))
 
     with pytest.raises(TypeError, match="Data for sheet 'Sheet 1' must be an object"):
-        mode.compile(schema, {"Sheet 1": "Alice"})
+        mo_dataport.compile(schema, {"Sheet 1": "Alice"})
 
 
 def test_compile_rejects_dynamic_sheet_payload_shape_and_names():
     schema = _schema(_sheet("{{reports}}", {"A1": _cell("A1", "{{name:string}}")}))
 
     with pytest.raises(TypeError, match="dynamic sheet group 'reports'"):
-        mode.compile(schema, {"reports": []})
+        mo_dataport.compile(schema, {"reports": []})
 
     with pytest.raises(TypeError, match="Dynamic sheet names under 'reports'"):
-        mode.compile(schema, {"reports": {1: {"name": "Acme"}}})
+        mo_dataport.compile(schema, {"reports": {1: {"name": "Acme"}}})
 
     with pytest.raises(TypeError, match="Data for dynamic sheet 'North'"):
-        mode.compile(schema, {"reports": {"North": "Acme"}})
+        mo_dataport.compile(schema, {"reports": {"North": "Acme"}})
 
 
 def test_compile_rejects_duplicate_output_sheet_names():
@@ -263,7 +263,7 @@ def test_compile_rejects_duplicate_output_sheet_names():
     )
 
     with pytest.raises(ValueError, match="Duplicate output sheet name 'Summary'"):
-        mode.compile(schema, {"Summary": {}, "reports": {"Summary": {"name": "Acme"}}})
+        mo_dataport.compile(schema, {"Summary": {}, "reports": {"Summary": {"name": "Acme"}}})
 
 
 def test_compile_validates_scalar_and_dataframe_types():
@@ -279,16 +279,16 @@ def test_compile_validates_scalar_and_dataframe_types():
     )
 
     with pytest.raises(TypeError, match="'active' expected type 'boolean'"):
-        mode.compile(
+        mo_dataport.compile(
             schema,
             {"Sheet 1": {"active": "yes", "when": "2024-01-01", "rows": []}},
         )
 
     with pytest.raises(TypeError, match="'when' expected type 'date'"):
-        mode.compile(schema, {"Sheet 1": {"active": True, "when": 42, "rows": []}})
+        mo_dataport.compile(schema, {"Sheet 1": {"active": True, "when": 42, "rows": []}})
 
     with pytest.raises(TypeError, match="'rows' expected a polars DataFrame"):
-        mode.compile(
+        mo_dataport.compile(
             schema,
             {"Sheet 1": {"active": True, "when": "2024-01-01", "rows": []}},
         )
@@ -302,7 +302,7 @@ def test_compile_substitutes_scalar_placeholders_inside_text():
         )
     )
 
-    bundle = mode.compile(schema, {"Sheet 1": {"name": "Acme", "amount": 42}})
+    bundle = mo_dataport.compile(schema, {"Sheet 1": {"name": "Acme", "amount": 42}})
 
     assert bundle.report["sheets"][0]["cells"]["A1"]["value"] == "Customer Acme owes 42"
 
@@ -319,7 +319,7 @@ def test_compile_accepts_boolean_and_date_scalar_values():
         )
     )
 
-    bundle = mode.compile(schema, {"Sheet 1": {"active": True, "when": when}})
+    bundle = mo_dataport.compile(schema, {"Sheet 1": {"active": True, "when": when}})
 
     cells = bundle.report["sheets"][0]["cells"]
     assert cells["A1"]["value"] is True

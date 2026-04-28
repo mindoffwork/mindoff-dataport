@@ -11,14 +11,14 @@ import json
 
 def test_roundtrip_schema_identical(fixture_path, managed_tmp_dir):
     """extract -> bundle export -> re-extract -> schemas must be deeply equal."""
-    from mindoff_dataport import mode
+    from mindoff_dataport import mo_dataport
 
-    schema_1 = mode.extract(fixture_path)
+    schema_1 = mo_dataport.extract(fixture_path)
     built_path = str(managed_tmp_dir / "rebuilt.xlsx")
     data = {sheet["name"]: {} for sheet in schema_1["sheets"]}
-    bundle = mode.compile(schema_1, data)
-    mode.export(bundle, built_path)
-    schema_2 = mode.extract(built_path)
+    bundle = mo_dataport.compile(schema_1, data)
+    mo_dataport.export(bundle, built_path)
+    schema_2 = mo_dataport.extract(built_path)
 
     for sheet in schema_1["sheets"]:
         sheet["merged_regions"].sort()

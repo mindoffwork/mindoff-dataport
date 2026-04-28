@@ -57,7 +57,7 @@ pip install polars
 ## Quick Start
 
 ```python
-from mindoff_dataport import mode as mo_dataport
+from mindoff_dataport import mo_dataport
 
 # 1. Extract the template
 template = mo_dataport.extract("invoice_template.xlsx")
@@ -113,7 +113,7 @@ mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 The recommended entrypoint is:
 
 ```python
-from mindoff_dataport import mode as mo_dataport
+from mindoff_dataport import mo_dataport
 ```
 
 All four public functions are also importable at the top level:
@@ -127,7 +127,7 @@ from mindoff_dataport import (
 )
 ```
 
-`mode.extract` / `mode.inputs` / `mode.compile` / `mode.export` are short aliases for the same functions.
+`mo_dataport.extract` / `mo_dataport.inputs` / `mo_dataport.compile` / `mo_dataport.export` are short aliases for the same functions.
 
 ---
 
@@ -562,7 +562,7 @@ Setting `auto_delete_bundle=True` in `export()` deletes the bundle directory aft
 ```python
 import datetime as dt
 import polars as pl
-from mindoff_dataport import mode as mo_dataport
+from mindoff_dataport import mo_dataport
 
 schema = mo_dataport.extract("template.xlsx")
 rows   = pl.scan_parquet("sales.parquet").select(["product", "units", "revenue"])

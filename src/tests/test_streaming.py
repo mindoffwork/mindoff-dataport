@@ -6,7 +6,7 @@ from zipfile import ZipFile
 import openpyxl
 import pytest
 
-from mindoff_dataport import mode
+from mindoff_dataport import mo_dataport
 
 # §1 Constants & Exceptions
 
@@ -62,9 +62,9 @@ def _schema(
 
 
 def _export_streaming(schema, data, managed_tmp_dir: Path, **options):
-    bundle = mode.compile(schema, data)
+    bundle = mo_dataport.compile(schema, data)
     out = managed_tmp_dir / "filled.xlsx"
-    return mode.export(bundle, str(out), export_mode="streaming", **options)
+    return mo_dataport.export(bundle, str(out), export_mode="streaming", **options)
 
 
 # §4 Public Functions
@@ -170,10 +170,10 @@ def test_streaming_rejects_invalid_row_limits(managed_tmp_dir: Path):
 
 def test_streaming_rejects_unknown_export_mode(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
 
     with pytest.raises(ValueError, match="Unsupported export_mode"):
-        mode.export(bundle, str(managed_tmp_dir / "out.xlsx"), export_mode="fast")
+        mo_dataport.export(bundle, str(managed_tmp_dir / "out.xlsx"), export_mode="fast")
 
 
 def test_streaming_rejects_multiple_content_anchors(managed_tmp_dir: Path):
@@ -196,7 +196,7 @@ def test_streaming_rejects_multiple_content_anchors(managed_tmp_dir: Path):
 
 def test_streaming_rejects_missing_and_unsupported_source(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"rows": polars.DataFrame({"A": [1]})}},
         bundle_path=str(managed_tmp_dir / "bundle"),
@@ -207,12 +207,12 @@ def test_streaming_rejects_missing_and_unsupported_source(managed_tmp_dir: Path)
     source_path = Path(bundle.path) / source["path"]
     source_path.unlink()
     with pytest.raises(ValueError, match="missing dataframe source"):
-        mode.export(bundle, str(out), export_mode="streaming")
+        mo_dataport.export(bundle, str(out), export_mode="streaming")
 
     polars.DataFrame({"A": [1]}).write_parquet(source_path)
     source["format"] = "csv"
     with pytest.raises(ValueError, match="Unsupported dataframe source format"):
-        mode.export(bundle, str(out), export_mode="streaming")
+        mo_dataport.export(bundle, str(out), export_mode="streaming")
 
 
 def test_streaming_writes_empty_dataframe_without_content_rows(managed_tmp_dir: Path):
@@ -458,7 +458,7 @@ def test_pdf_renders_repeat_records(managed_tmp_dir: Path):
         },
         dims="A1:B4",
     )
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -477,7 +477,7 @@ def test_pdf_renders_repeat_records(managed_tmp_dir: Path):
     )
     out = managed_tmp_dir / "repeat.pdf"
 
-    mode.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
@@ -543,10 +543,10 @@ def test_pdf_supports_repeat_merged_fixed_rows(managed_tmp_dir: Path):
         dims="A1:B3",
         merges=["A2:B2"],
     )
-    bundle = mode.compile(schema, {"Sheet1": {"reports": [{"name": "Acme"}]}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"reports": [{"name": "Acme"}]}})
     out = managed_tmp_dir / "merged-repeat.pdf"
 
-    mode.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
@@ -571,10 +571,10 @@ def test_pdf_supports_static_merge_before_repeat_section(managed_tmp_dir: Path):
         dims="A1:B4",
         merges=["A1:B1"],
     )
-    bundle = mode.compile(schema, {"Sheet1": {"reports": [{"name": "Acme"}]}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"reports": [{"name": "Acme"}]}})
     out = managed_tmp_dir / "static-merged-title.pdf"
 
-    mode.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
@@ -683,7 +683,7 @@ def test_pdf_renders_sibling_repeat_sections(managed_tmp_dir: Path):
         },
         dims="A1:A8",
     )
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -694,7 +694,7 @@ def test_pdf_renders_sibling_repeat_sections(managed_tmp_dir: Path):
     )
     out = managed_tmp_dir / "sibling-repeat.pdf"
 
-    mode.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=2)
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")

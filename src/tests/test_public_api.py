@@ -5,7 +5,7 @@ from mindoff_dataport import (
     export_report_bundle,
     extract_template,
     get_template_inputs,
-    mode,
+    mo_dataport,
 )
 
 # §1 Constants & Exceptions
@@ -60,28 +60,29 @@ def _schema() -> dict:
 # §4 Public Functions
 
 
-def test_mode_namespace_exposes_bundle_first_aliases():
-    assert mode.extract is extract_template
-    assert mode.inputs is get_template_inputs
-    assert mode.compile is compile_report_bundle
-    assert mode.export is export_report_bundle
+def test_mo_dataport_namespace_exposes_bundle_first_aliases():
+    assert mo_dataport.extract is extract_template
+    assert mo_dataport.inputs is get_template_inputs
+    assert mo_dataport.compile is compile_report_bundle
+    assert mo_dataport.export is export_report_bundle
     assert not hasattr(mindoff_dataport, "parquet_source")
-    assert not hasattr(mode, "parquet_source")
-    assert not hasattr(mode, "build")
-    assert not hasattr(mode, "alter_schema")
+    assert not hasattr(mo_dataport, "parquet_source")
+    assert not hasattr(mo_dataport, "build")
+    assert not hasattr(mo_dataport, "alter_schema")
+    assert not hasattr(mindoff_dataport, "mode")
 
 
-def test_mode_bundle_aliases_work(managed_tmp_dir):
+def test_mo_dataport_bundle_aliases_work(managed_tmp_dir):
     schema = _schema()
 
-    inputs = mode.inputs(schema)
+    inputs = mo_dataport.inputs(schema)
     assert inputs == {"Sheet1": {"name": "string"}}
 
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
     assert bundle.report["sheets"][0]["cells"]["A1"]["value"] == "Alice"
 
     output = managed_tmp_dir / "out.xlsx"
-    mode.export(bundle, str(output))
+    mo_dataport.export(bundle, str(output))
     assert output.exists()
 
 

@@ -8,7 +8,7 @@ import openpyxl
 import pytest
 import reportlab
 
-from mindoff_dataport import mode
+from mindoff_dataport import mo_dataport
 from mindoff_dataport.bundle import load_report_bundle
 from mindoff_dataport.pdf_renderer import _FontResolver, _LazyFlowables, _table_style
 
@@ -94,7 +94,7 @@ def test_compile_creates_valid_report_bundle_directory(managed_tmp_dir: Path):
     df = polars.DataFrame({"A": [1, 2], "B": [3, 4]})
     bundle_path = managed_tmp_dir / "report_bundle"
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"name": "Alice", "rows": df}},
         bundle_path=str(bundle_path),
@@ -134,7 +134,7 @@ def test_compile_creates_compact_repeat_section_bundle(managed_tmp_dir: Path):
     )
     rows = polars.DataFrame({"sku": ["A", "B"], "qty": [1, 2]})
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -168,7 +168,7 @@ def test_compile_rejects_repeat_payload_that_is_not_list():
     )
 
     with pytest.raises(TypeError, match="must be a list"):
-        mode.compile(schema, {"Sheet1": {"reports": {"customer_name": "Acme"}}})
+        mo_dataport.compile(schema, {"Sheet1": {"reports": {"customer_name": "Acme"}}})
 
 
 def test_compile_rejects_repeat_item_that_is_not_dict():
@@ -182,7 +182,7 @@ def test_compile_rejects_repeat_item_that_is_not_dict():
     )
 
     with pytest.raises(TypeError, match="item 0.*must be an object/dict"):
-        mode.compile(schema, {"Sheet1": {"reports": ["Acme"]}})
+        mo_dataport.compile(schema, {"Sheet1": {"reports": ["Acme"]}})
 
 
 def test_compile_rejects_repeat_item_missing_required_value():
@@ -196,7 +196,7 @@ def test_compile_rejects_repeat_item_missing_required_value():
     )
 
     with pytest.raises(KeyError, match="Sheet 'Sheet1.reports\\[0\\]' requires"):
-        mode.compile(schema, {"Sheet1": {"reports": [{}]}})
+        mo_dataport.compile(schema, {"Sheet1": {"reports": [{}]}})
 
 
 def test_compile_preserves_static_content_after_repeat_end():
@@ -210,7 +210,7 @@ def test_compile_preserves_static_content_after_repeat_end():
         dims="A1:A4",
     )
 
-    bundle = mode.compile(schema, {"Sheet1": {"reports": [{"customer_name": "Acme"}]}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"reports": [{"customer_name": "Acme"}]}})
 
     assert bundle.report["sheets"][0]["cells"]["A4"]["value"] == "Footer"
 
@@ -232,7 +232,7 @@ def test_compile_creates_ordered_sibling_repeat_sections():
         dims="A1:B10",
     )
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -275,7 +275,7 @@ def test_compile_stores_repeat_merges_as_relative_metadata():
     )
     schema["sheets"][0]["merged_regions"] = ["A2:B2"]
 
-    bundle = mode.compile(schema, {"Sheet1": {"reports": [{"customer_name": "Acme"}]}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"reports": [{"customer_name": "Acme"}]}})
 
     section = bundle.report["sheets"][0]["repeat_sections"][0]
     assert bundle.report["sheets"][0]["merged_regions"] == []
@@ -303,7 +303,7 @@ def test_compile_rejects_repeat_merge_over_dataframe_content():
     schema["sheets"][0]["merged_regions"] = ["A2:B2"]
 
     with pytest.raises(ValueError, match="dataframe-content rows"):
-        mode.compile(
+        mo_dataport.compile(
             schema,
             {
                 "Sheet1": {
@@ -319,7 +319,7 @@ def test_compile_without_bundle_path_creates_temp_directory():
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
     df = polars.DataFrame({"A": [1]})
 
-    bundle = mode.compile(schema, {"Sheet1": {"rows": df}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"rows": df}})
 
     path = Path(bundle.path)
     assert path.exists()
@@ -336,7 +336,7 @@ def test_compile_accepts_lazyframe_without_collecting_rows(managed_tmp_dir: Path
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "bundle"
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"rows": polars.scan_parquet(source_path).select(["B", "A"])}},
         bundle_path=str(bundle_path),
@@ -351,7 +351,7 @@ def test_compile_accepts_lazyframe_without_collecting_rows(managed_tmp_dir: Path
 
 def test_report_bundle_write_copies_directory(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
     target = managed_tmp_dir / "copied_bundle"
 
     bundle.write(str(target))
@@ -367,12 +367,12 @@ def test_compile_rejects_bundle_path_that_is_file(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
 
     with pytest.raises(ValueError, match="must be a directory"):
-        mode.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(target))
+        mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(target))
 
 
 def test_report_bundle_write_rejects_file_target(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
     target = managed_tmp_dir / "bundle-file"
     target.write_text("not a directory", encoding="utf-8")
 
@@ -415,7 +415,7 @@ def test_compile_rejects_non_polars_dataframe_source():
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
 
     with pytest.raises(TypeError, match="expected a polars DataFrame or LazyFrame"):
-        mode.compile(schema, {"Sheet1": {"rows": [{"A": 1}]}})
+        mo_dataport.compile(schema, {"Sheet1": {"rows": [{"A": 1}]}})
 
 
 def test_compile_sanitizes_and_deduplicates_dataframe_source_ids(managed_tmp_dir: Path):
@@ -433,7 +433,7 @@ def test_compile_sanitizes_and_deduplicates_dataframe_source_ids(managed_tmp_dir
     }
     df = polars.DataFrame({"A": [1]})
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"reports": {"North/West": {"rows": df}, "North?West": {"rows": df.clone()}}},
         bundle_path=str(managed_tmp_dir / "bundle"),
@@ -449,7 +449,7 @@ def test_compile_sanitizes_and_deduplicates_dataframe_source_ids(managed_tmp_dir
 def test_compile_serializes_date_scalar_in_report():
     schema = _schema({"A1": _cell("A1", "{{when:date}}")}, dims="A1:A1")
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"when": datetime.datetime(2024, 1, 2, 3, 4, 5)}},
     )
@@ -467,14 +467,14 @@ def test_xlsx_export_uses_bundle_data_without_expanding_report(managed_tmp_dir: 
         dims="A1:B3",
     )
     df = polars.DataFrame({"A": [1, 2], "B": [3, 4]})
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"name": "Alice", "headers": df, "rows": df}},
     )
 
     assert "A3" not in bundle.report["sheets"][0]["cells"]
     out = managed_tmp_dir / "out.xlsx"
-    paths = mode.export(bundle, str(out), export_mode="streaming")
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
 
     wb = openpyxl.load_workbook(paths[0], data_only=True)
     ws = wb["Sheet1"]
@@ -492,7 +492,7 @@ def test_xlsx_export_uses_bundle_data_without_expanding_report(managed_tmp_dir: 
 def test_dataframe_placeholder_writes_headers_and_content(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe}}")}, dims="A1:B1")
     df = polars.DataFrame({"A": [1, 2], "B": [3, 4]}).lazy()
-    bundle = mode.compile(schema, {"Sheet1": {"rows": df}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"rows": df}})
 
     anchors = bundle.report["sheets"][0]["dataframe_anchors"]
     assert [anchor["placeholder_type"] for anchor in anchors] == [
@@ -503,7 +503,7 @@ def test_dataframe_placeholder_writes_headers_and_content(managed_tmp_dir: Path)
     assert anchors[1]["start_row"] == 2
 
     out = managed_tmp_dir / "combined.xlsx"
-    paths = mode.export(bundle, str(out), export_mode="streaming")
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
 
     wb = openpyxl.load_workbook(paths[0], data_only=True)
     ws = wb["Sheet1"]
@@ -521,7 +521,7 @@ def test_dataframe_header_only_does_not_write_source_file(managed_tmp_dir: Path)
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-header}}")}, dims="A1:B1")
     df = polars.DataFrame({"A": [1], "B": [2]}).lazy()
 
-    bundle = mode.compile(schema, {"Sheet1": {"rows": df}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"rows": df}})
 
     assert bundle.manifest["dataframe_sources"] == []
     anchors = bundle.report["sheets"][0]["dataframe_anchors"]
@@ -533,7 +533,7 @@ def test_dataframe_header_only_does_not_write_source_file(managed_tmp_dir: Path)
 def test_old_dataframe_headers_spelling_is_not_a_placeholder():
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-headers}}")}, dims="A1:A1")
 
-    assert mode.inputs(schema) == {"Sheet1": {}}
+    assert mo_dataport.inputs(schema) == {"Sheet1": {}}
 
 
 def test_compile_deduplicates_same_lazyframe_object(managed_tmp_dir: Path):
@@ -548,7 +548,7 @@ def test_compile_deduplicates_same_lazyframe_object(managed_tmp_dir: Path):
         dims="A1:B2",
     )
 
-    bundle = mode.compile(schema, {"Sheet1": {"headers": rows, "rows": rows}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"headers": rows, "rows": rows}})
 
     assert len(bundle.manifest["dataframe_sources"]) == 1
     content_anchor = [
@@ -570,7 +570,7 @@ def test_compile_keeps_distinct_lazyframe_objects_separate(managed_tmp_dir: Path
         dims="A1:B3",
     )
 
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -586,10 +586,10 @@ def test_compile_keeps_distinct_lazyframe_objects_separate(managed_tmp_dir: Path
 def test_export_accepts_bundle_path(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "report_bundle"
-    mode.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(bundle_path))
+    mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(bundle_path))
     out = managed_tmp_dir / "out.xlsx"
 
-    mode.export(str(bundle_path), str(out))
+    mo_dataport.export(str(bundle_path), str(out))
 
     wb = openpyxl.load_workbook(out, data_only=True)
     assert wb["Sheet1"]["A1"].value == "Alice"
@@ -602,10 +602,10 @@ def test_xlsx_export_preserves_gridline_visibility(managed_tmp_dir: Path):
         dims="A1:A1",
         show_gridlines=False,
     )
-    bundle = mode.compile(schema, {"Sheet1": {}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
     out = managed_tmp_dir / "no-gridlines.xlsx"
 
-    mode.export(bundle, str(out))
+    mo_dataport.export(bundle, str(out))
 
     wb = openpyxl.load_workbook(out)
     assert wb["Sheet1"].sheet_view.showGridLines is False
@@ -627,10 +627,10 @@ def test_xlsx_export_preserves_merged_region_border(managed_tmp_dir: Path):
     shadow["merge_anchor"] = "A1"
     schema = _schema({"A1": title, "B2": shadow}, dims="A1:B2")
     schema["sheets"][0]["merged_regions"] = ["A1:B2"]
-    bundle = mode.compile(schema, {"Sheet1": {}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
     out = managed_tmp_dir / "merged-border.xlsx"
 
-    mode.export(bundle, str(out))
+    mo_dataport.export(bundle, str(out))
 
     wb = openpyxl.load_workbook(out)
     ws = wb["Sheet1"]
@@ -643,10 +643,10 @@ def test_xlsx_export_preserves_merged_region_border(managed_tmp_dir: Path):
 
 def test_export_pdf_creates_nonempty_pdf(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
     out = managed_tmp_dir / "out.pdf"
 
-    mode.export(bundle, str(out), format="pdf")
+    mo_dataport.export(bundle, str(out), format="pdf")
 
     assert out.exists()
     assert out.stat().st_size > 0
@@ -655,10 +655,10 @@ def test_export_pdf_creates_nonempty_pdf(managed_tmp_dir: Path):
 
 def test_export_image_is_reserved(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
 
     with pytest.raises(NotImplementedError, match="image"):
-        mode.export(bundle, str(managed_tmp_dir / "out.png"), format="image")
+        mo_dataport.export(bundle, str(managed_tmp_dir / "out.png"), format="image")
 
 
 def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
@@ -671,7 +671,7 @@ def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
         },
         dims="A1:B2",
     )
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {
             "Sheet1": {
@@ -682,7 +682,7 @@ def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
     )
     out = managed_tmp_dir / "table.pdf"
 
-    mode.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
@@ -702,10 +702,10 @@ def test_pdf_export_handles_merges_and_basic_styles(managed_tmp_dir: Path):
     shadow["merge_anchor"] = "A1"
     schema = _schema({"A1": title, "B1": shadow}, dims="A1:B1")
     schema["sheets"][0]["merged_regions"] = ["A1:B1"]
-    bundle = mode.compile(schema, {"Sheet1": {}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
     out = managed_tmp_dir / "styled.pdf"
 
-    mode.export(bundle, str(out), format="pdf")
+    mo_dataport.export(bundle, str(out), format="pdf")
 
     assert out.exists()
     assert out.stat().st_size > 0
@@ -798,10 +798,10 @@ def test_pdf_export_accepts_custom_fonts(managed_tmp_dir: Path):
     cell["font"] = dict(cell["font"])
     cell["font"]["name"] = "Vera"
     schema = _schema({"A1": cell}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
     out = managed_tmp_dir / "custom-font.pdf"
 
-    mode.export(
+    mo_dataport.export(
         bundle,
         str(out),
         format="pdf",
@@ -815,10 +815,10 @@ def test_pdf_export_accepts_custom_fonts(managed_tmp_dir: Path):
 def test_pdf_export_accepts_bundle_path(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "report_bundle"
-    mode.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(bundle_path))
+    mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}}, bundle_path=str(bundle_path))
     out = managed_tmp_dir / "out.pdf"
 
-    mode.export(str(bundle_path), str(out), format="pdf")
+    mo_dataport.export(str(bundle_path), str(out), format="pdf")
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
@@ -827,14 +827,14 @@ def test_pdf_export_accepts_bundle_path(managed_tmp_dir: Path):
 def test_pdf_export_auto_delete_removes_bundle_after_success(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "bundle"
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"name": "Alice"}},
         bundle_path=str(bundle_path),
     )
     out = managed_tmp_dir / "out.pdf"
 
-    mode.export(bundle, str(out), format="pdf", auto_delete_bundle=True)
+    mo_dataport.export(bundle, str(out), format="pdf", auto_delete_bundle=True)
 
     assert out.exists()
     assert not bundle_path.exists()
@@ -842,10 +842,10 @@ def test_pdf_export_auto_delete_removes_bundle_after_success(managed_tmp_dir: Pa
 
 def test_pdf_export_rejects_streaming_export_mode(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
 
     with pytest.raises(ValueError, match="PDF export does not support export_mode"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "out.pdf"),
             format="pdf",
@@ -855,24 +855,24 @@ def test_pdf_export_rejects_streaming_export_mode(managed_tmp_dir: Path):
 
 def test_pdf_export_rejects_invalid_page_options(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {"name": "Alice"}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
 
     with pytest.raises(ValueError, match="Unsupported PDF page_size"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "bad-page.pdf"),
             format="pdf",
             page_size="tabloid",
         )
     with pytest.raises(ValueError, match="Unsupported PDF orientation"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "bad-orientation.pdf"),
             format="pdf",
             orientation="sideways",
         )
     with pytest.raises(ValueError, match="margin must be non-negative"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "bad-margin.pdf"),
             format="pdf",
@@ -882,24 +882,24 @@ def test_pdf_export_rejects_invalid_page_options(managed_tmp_dir: Path):
 
 def test_pdf_export_rejects_invalid_font_configs(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "Custom Font")}, dims="A1:A1")
-    bundle = mode.compile(schema, {"Sheet1": {}})
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
 
     with pytest.raises(TypeError, match="PDF font config must be a path or dict"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "bad-font-type.pdf"),
             format="pdf",
             fonts={"Broken": 42},
         )
     with pytest.raises(ValueError, match="file does not exist"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "missing-font.pdf"),
             format="pdf",
             fonts={"Missing": str(managed_tmp_dir / "missing.ttf")},
         )
     with pytest.raises(ValueError, match="requires a regular font file"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "missing-regular.pdf"),
             format="pdf",
@@ -919,14 +919,14 @@ def test_load_rejects_malformed_bundle(managed_tmp_dir: Path):
 def test_export_auto_delete_removes_bundle_after_success(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "bundle"
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"name": "Alice"}},
         bundle_path=str(bundle_path),
     )
     out = managed_tmp_dir / "out.xlsx"
 
-    mode.export(bundle, str(out), auto_delete_bundle=True)
+    mo_dataport.export(bundle, str(out), auto_delete_bundle=True)
 
     assert out.exists()
     assert not bundle_path.exists()
@@ -936,14 +936,14 @@ def test_failed_export_preserves_bundle_directory(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
     df = polars.DataFrame({"A": [1]})
     bundle_path = managed_tmp_dir / "bundle"
-    bundle = mode.compile(
+    bundle = mo_dataport.compile(
         schema,
         {"Sheet1": {"rows": df}},
         bundle_path=str(bundle_path),
     )
 
     with pytest.raises(ValueError, match="Fidelity XLSX export does not support"):
-        mode.export(
+        mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "out.xlsx"),
             auto_delete_bundle=True,

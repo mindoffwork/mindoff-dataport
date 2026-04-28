@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from .bundle import (
@@ -7,8 +8,8 @@ from .bundle import (
     compile_report_bundle as _compile_report_bundle_impl,
 )
 from .extractor import extract_template as _extract_template_impl
-from .template_contract import get_template_inputs as _get_template_inputs_impl
 from .schema import WorkbookSchema
+from .template_contract import get_template_inputs as _get_template_inputs_impl
 from .xlsx_renderer import export_report_bundle as _export_report_bundle_impl
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "inputs",
     "compile",
     "export",
+    "mo_dataport",
 ]
 
 # §1 Constants & Exceptions
@@ -66,6 +68,13 @@ extract = extract_template
 inputs = get_template_inputs
 compile = compile_report_bundle
 export = export_report_bundle
+
+mo_dataport = SimpleNamespace(
+    extract=extract_template,
+    inputs=get_template_inputs,
+    compile=compile_report_bundle,
+    export=export_report_bundle,
+)
 
 
 # §5 Entrypoints

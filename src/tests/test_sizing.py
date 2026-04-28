@@ -5,7 +5,7 @@ import datetime
 import openpyxl
 import pytest
 
-from mindoff_dataport import mode
+from mindoff_dataport import mo_dataport
 
 # §1 Constants & Exceptions
 
@@ -55,8 +55,8 @@ def _minimal_sheet(cells_dict, **extra):
 
 def _build_and_reload(schema, managed_tmp_dir):
     out = str(managed_tmp_dir / "out.xlsx")
-    bundle = mode.compile(schema, {"Sheet1": {}})
-    mode.export(bundle, out)
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+    mo_dataport.export(bundle, out)
     return openpyxl.load_workbook(out)
 
 
