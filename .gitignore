@@ -48,6 +48,7 @@ Thumbs.db
 # Local tooling
 .claude/
 CLAUDE.md
+claude.md
 AGENTS.md
 
 # Generated example outputs
