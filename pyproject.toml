@@ -1,29 +1,74 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mindoff_dataport"
+name = "mindoff-dataport"
 version = "0.1.0"
-description = "Extract and reconstruct .xlsx templates with full visual fidelity"
+description = "Extract xlsx templates with full visual fidelity and render data-driven reports in xlsx and PDF formats."
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
-dependencies = ["openpyxl>=3.1.0", "pyarrow>=15.0", "reportlab>=4.0"]
+license = "MIT"
+
+authors = [
+  { name = "Joel Samraj" }
+]
+
+keywords = [
+  "xlsx",
+  "excel",
+  "report",
+  "template",
+  "pdf",
+  "dataframe",
+  "export",
+  "openpyxl",
+  "reportlab",
+  "data-export",
+]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: Office/Business :: Financial :: Spreadsheet",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+
+dependencies = [
+  "openpyxl>=3.1.0,<4.0",
+  "pyarrow>=15.0,<21.0",
+  "reportlab>=4.0,<5.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+polars = [
+  "polars>=1.0,<2.0",
+]
+dev = [
+  "pytest>=8.0,<9.0",
+  "pytest-cov>=5.0,<7.0",
+  "polars>=1.0,<2.0",
+]
 
-[tool.coverage.run]
-source = ["mindoff_dataport"]
-branch = true
-
-[tool.coverage.report]
-fail_under = 90
-show_missing = true
-skip_covered = true
-omit = ["src/tests/*", "examples/*"]
+[project.urls]
+"Homepage" = "https://github.com/mindoffwork/mindoff-dataport"
+"Source" = "https://github.com/mindoffwork/mindoff-dataport.git"
+"Issues" = "https://github.com/mindoffwork/mindoff-dataport/issues"
+"Changelog" = "https://github.com/mindoffwork/mindoff-dataport/blob/root/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mindoff_dataport"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/src/tests"]
+exclude = ["/src/tests", "/examples"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"src/mindoff_dataport/py.typed" = "mindoff_dataport/py.typed"
+

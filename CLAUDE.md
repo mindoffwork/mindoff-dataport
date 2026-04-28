@@ -32,14 +32,10 @@ Rules:
 
 Stable unless explicitly changed:
 
-- `extract_template(path)`
-- `get_template_inputs(schema)`
-- `compile_report_bundle(template, data, bundle_path=None)`
-- `export_report_bundle(bundle_or_path, output_path, format="xlsx", **options)`
-- `mode.extract(path)`
-- `mode.inputs(template)`
-- `mode.compile(template, data, bundle_path=None)`
-- `mode.export(bundle_or_path, output_path, format="xlsx", **options)`
+- `extract_template(path)` / `extract(path)`
+- `get_template_inputs(schema)` / `inputs(schema)`
+- `compile_report_bundle(template, data, bundle_path=None)` / `compile(template, data, bundle_path=None)`
+- `export_report_bundle(bundle_or_path, output_path, format="xlsx", **options)` / `export(bundle_or_path, output_path, format="xlsx", **options)`
 
 Notes:
 

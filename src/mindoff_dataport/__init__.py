@@ -17,7 +17,10 @@ __all__ = [
     "get_template_inputs",
     "compile_report_bundle",
     "export_report_bundle",
-    "mode",
+    "extract",
+    "inputs",
+    "compile",
+    "export",
 ]
 
 # §1 Constants & Exceptions
@@ -59,15 +62,10 @@ def export_report_bundle(
     )
 
 
-class _ModeAPI:
-    """Bundle-first public API namespace."""
+extract = extract_template
+inputs = get_template_inputs
+compile = compile_report_bundle
+export = export_report_bundle
 
-    extract = staticmethod(extract_template)
-    inputs = staticmethod(get_template_inputs)
-    compile = staticmethod(compile_report_bundle)
-    export = staticmethod(export_report_bundle)
-
-
-mode = _ModeAPI()
 
 # §5 Entrypoints
