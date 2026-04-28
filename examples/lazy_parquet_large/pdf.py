@@ -4,31 +4,39 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
+import polars as pl
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from mindoff_dataport import mode as mo_dataport
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE_XLSX = HERE / "template.xlsx"
-OUTPUT_XLSX = HERE / "output.xlsx"
+DATA_PARQUET = HERE / "data.parquet"
+OUTPUT_PDF = HERE / "output.pdf"
 
 
 def main() -> None:
     started = perf_counter()
 
     schema = mo_dataport.extract(str(TEMPLATE_XLSX))
-    bundle = mo_dataport.compile(
-        schema,
-        {
-            "Summary": {"customer": "Acme Industries", "total": 12500},
-            "Details": {"owner": "Finance", "status": "Approved"},
-        },
+    rows = (
+        pl.scan_parquet(DATA_PARQUET)
+        .filter(pl.col("units") >= 5)
+        .select(["order_id", "region", "units", "amount"])
     )
-    mo_dataport.export(bundle, str(OUTPUT_XLSX))
+    bundle = mo_dataport.compile(schema, {"Lazy Parquet": {"rows": rows}})
+    mo_dataport.export(
+        bundle,
+        str(OUTPUT_PDF),
+        format="pdf",
+        streaming_chunk_rows=25,
+    )
 
     elapsed = perf_counter() - started
     print(f"Template: {TEMPLATE_XLSX}")
-    print(f"Output:   {OUTPUT_XLSX}")
+    print(f"Parquet:  {DATA_PARQUET}")
+    print(f"Output:   {OUTPUT_PDF}")
     print(f"Bundle:   {bundle.path}")
     print(f"Elapsed:  {elapsed:.2f}s")
 
