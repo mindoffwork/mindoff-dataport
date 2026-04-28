@@ -257,7 +257,6 @@ def _validate_streaming(
                 "Streaming XLSX export does not support 'hug' sizing. Use fixed/even sizing or export_mode='fidelity'."
             )
         if sheet.get("repeat_sections"):
-            _validate_repeat_streaming_merges(sheet)
             continue
         content_anchors = [
             anchor
@@ -269,10 +268,6 @@ def _validate_streaming(
                 "Streaming XLSX export currently supports one dataframe-content placeholder per sheet."
             )
         _validate_streaming_merges(sheet, source_map, content_anchors)
-
-
-def _validate_repeat_streaming_merges(sheet: SheetSchema) -> None:
-    return None
 
 
 def _validate_streaming_merges(

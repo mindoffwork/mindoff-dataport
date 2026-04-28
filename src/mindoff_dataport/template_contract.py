@@ -205,15 +205,6 @@ def _collect_placeholders_in_rows(
     return found
 
 
-def _repeat_section(sheet: SheetSchema) -> dict[str, Any] | None:
-    sections = _repeat_sections(sheet)
-    if not sections:
-        return None
-    if len(sections) > 1:
-        raise ValueError("Multiple repeat sections were found; use _repeat_sections")
-    return sections[0]
-
-
 def _repeat_sections(sheet: SheetSchema) -> list[dict[str, Any]]:
     markers: list[dict[str, Any]] = []
     for cell in sheet["cells"].values():
