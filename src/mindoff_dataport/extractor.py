@@ -18,7 +18,7 @@ from .schema import (
     SheetSchema,
     WorkbookSchema,
 )
-from .utils import border_side_to_dict, normalize_color
+from .style_conversion import border_side_to_dict, normalize_color
 
 # §1 Constants & Exceptions
 

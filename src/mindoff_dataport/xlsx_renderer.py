@@ -17,7 +17,7 @@ from openpyxl.utils.cell import (
     get_column_letter,
 )
 
-from .builder import (
+from .xlsx_builder import (
     _apply_cell_styles,
     _apply_cell_value,
     _apply_dimensions,
@@ -29,7 +29,7 @@ from .builder import (
     _build_font,
 )
 from .bundle import ReportBundle, load_report_bundle
-from .renderer import _infer_cell_type, _parse_dims
+from .template_contract import _infer_cell_type, _parse_dims
 from .schema import CellSchema, SheetSchema
 
 __all__ = ["export_report_bundle"]
@@ -97,6 +97,20 @@ def _header_cells(anchor: dict[str, Any]) -> Iterable[tuple[str, CellSchema]]:
         yield coord, header_cell  # type: ignore[misc]
 
 
+def _header_cells_at(anchor: dict[str, Any], row_idx: int) -> Iterable[CellSchema]:
+    cell = anchor["cell"]
+    start_col = anchor["start_col"]
+    bold_font = dict(cell["font"])
+    bold_font["bold"] = True
+    for offset, header in enumerate(anchor["columns"]):
+        header_cell = dict(cell)
+        header_cell["coordinate"] = f"{get_column_letter(start_col + offset)}{row_idx}"
+        header_cell["value"] = str(header)
+        header_cell["cell_type"] = "string"
+        header_cell["font"] = bold_font
+        yield header_cell  # type: ignore[misc]
+
+
 def _content_cells(
     bundle: ReportBundle,
     source_map: dict[str, dict[str, Any]],
@@ -127,6 +141,10 @@ def _render_fidelity(
     default_column_width: float | None = None,
     default_row_height: float | None = None,
 ) -> None:
+    if any(sheet.get("repeat_sections") for sheet in bundle.report["sheets"]):
+        raise ValueError(
+            "Fidelity XLSX export does not support repeat sections. Use export_mode='streaming'."
+        )
     if bundle.manifest.get("dataframe_sources"):
         raise ValueError(
             "Fidelity XLSX export does not support file-backed dataframe sources. Use export_mode='streaming'."
@@ -238,6 +256,9 @@ def _validate_streaming(
             raise ValueError(
                 "Streaming XLSX export does not support 'hug' sizing. Use fixed/even sizing or export_mode='fidelity'."
             )
+        if sheet.get("repeat_sections"):
+            _validate_repeat_streaming_merges(sheet)
+            continue
         content_anchors = [
             anchor
             for anchor in sheet.get("dataframe_anchors", [])
@@ -248,6 +269,10 @@ def _validate_streaming(
                 "Streaming XLSX export currently supports one dataframe-content placeholder per sheet."
             )
         _validate_streaming_merges(sheet, source_map, content_anchors)
+
+
+def _validate_repeat_streaming_merges(sheet: SheetSchema) -> None:
+    return None
 
 
 def _validate_streaming_merges(
@@ -370,6 +395,7 @@ def _streaming_plan(
     static: dict[tuple[int, int], CellSchema] = {}
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
     content = None
+    repeat_rows = None
 
     for cell in sheet["cells"].values():
         if _is_non_anchor_merged_cell(cell):
@@ -400,15 +426,226 @@ def _streaming_plan(
         }
         max_col = max(max_col, anchor["start_col"] + max(len(anchor["columns"]) - 1, 0))
 
+    if sheet.get("repeat_sections"):
+        repeat_rows = _repeat_row_stream(
+            bundle,
+            source_map,
+            sheet,
+            streaming_chunk_rows=streaming_chunk_rows,
+        )
+        content = {"exhausted": False}
+        max_col = _repeat_max_col(sheet, max_col)
+
     return {
         "sheet": sheet,
         "static": static,
         "content": content,
+        "repeat_rows": repeat_rows,
         "min_col": min_col,
         "min_row": min_row,
         "max_col": max_col,
         "max_row": max_row,
     }
+
+
+def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
+    max_col = current
+    for section in sheet.get("repeat_sections", []):
+        for record in section["records"]:
+            for item in record["cells"]:
+                max_col = max(max_col, item["start_col"])
+            for anchor in record["dataframe_anchors"]:
+                max_col = max(
+                    max_col,
+                    anchor["start_col"] + max(len(anchor["columns"]) - 1, 0),
+                )
+    return max_col
+
+
+def _repeat_row_stream(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    sheet: SheetSchema,
+    *,
+    streaming_chunk_rows: int,
+) -> Iterator[dict[str, Any]]:
+    _, min_row, _, max_row = _parse_dims(sheet["dimensions"])
+    cursor = min_row
+    for section in sheet["repeat_sections"]:
+        yield from _static_repeat_rows(sheet, cursor, section["start_row"] - 1)
+        for record in section["records"]:
+            yield from _repeat_record_rows(
+                bundle,
+                source_map,
+                record,
+                block_height=section["block_height"],
+                merges=section.get("merged_regions", []),
+                batch_size=streaming_chunk_rows,
+            )
+        cursor = section["end_row"] + 1
+    yield from _static_repeat_rows(sheet, cursor, max_row)
+
+
+def _static_repeat_rows(
+    sheet: SheetSchema, start_row: int, end_row: int
+) -> Iterator[dict[str, Any]]:
+    if end_row < start_row:
+        return
+    for row_idx in range(start_row, end_row + 1):
+        row_cells: dict[int, CellSchema] = {}
+        for cell in sheet["cells"].values():
+            cell_row, col_idx = _coord_indexes(cell["coordinate"])
+            if cell_row == row_idx:
+                row_cells[col_idx] = cell
+        yield {"cells": row_cells, "merges": _static_row_merges(sheet, row_idx)}
+
+
+def _static_row_merges(sheet: SheetSchema, row_idx: int) -> list[dict[str, Any]]:
+    merges: list[dict[str, Any]] = []
+    for raw_region in sheet.get("merged_regions", []):
+        region = CellRange(raw_region)
+        if region.min_row != row_idx:
+            continue
+        merges.append(
+            {
+                "min_row_offset": 0,
+                "max_row_offset": region.max_row - region.min_row,
+                "min_col": region.min_col,
+                "max_col": region.max_col,
+            }
+        )
+    return merges
+
+
+def _coord_indexes(coord: str) -> tuple[int, int]:
+    col_letter, row_idx = coordinate_from_string(coord)
+    return row_idx, column_index_from_string(col_letter)
+
+
+def _repeat_record_rows(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    record: dict[str, Any],
+    *,
+    block_height: int,
+    merges: list[dict[str, Any]] | None = None,
+    batch_size: int,
+) -> Iterator[dict[str, Any]]:
+    cells_by_offset: dict[int, dict[int, CellSchema]] = {}
+    for item in record["cells"]:
+        cell = item["cell"]
+        cells_by_offset.setdefault(item["row_offset"], {})[item["start_col"]] = cell
+    _apply_repeat_merge_edge_cells(cells_by_offset, merges or [])
+
+    headers_by_offset: dict[int, list[dict[str, Any]]] = {}
+    content_by_offset: dict[int, list[dict[str, Any]]] = {}
+    for anchor in record["dataframe_anchors"]:
+        target = (
+            headers_by_offset
+            if anchor["placeholder_type"] == "dataframe-header"
+            else content_by_offset
+        )
+        target.setdefault(anchor["start_row_offset"], []).append(anchor)
+
+    for offset in range(block_height):
+        row_cells = dict(cells_by_offset.get(offset, {}))
+        for anchor in headers_by_offset.get(offset, []):
+            for cell in _header_cells_at(anchor, offset + 1):
+                _, col_idx = _coord_indexes(cell["coordinate"])
+                row_cells[col_idx] = cell
+
+        content_anchors = content_by_offset.get(offset, [])
+        if not content_anchors:
+            yield {
+                "cells": row_cells,
+                "merges": _repeat_merges_starting_at(merges or [], offset),
+            }
+            continue
+        yield from _repeat_content_rows(
+            bundle,
+            source_map,
+            row_cells,
+            content_anchors,
+            batch_size=batch_size,
+        )
+
+
+def _apply_repeat_merge_edge_cells(
+    cells_by_offset: dict[int, dict[int, CellSchema]],
+    merges: list[dict[str, Any]],
+) -> None:
+    for merge in merges:
+        anchor = cells_by_offset.get(merge["min_row_offset"], {}).get(merge["min_col"])
+        if anchor is None:
+            continue
+        cell_range = CellRange(
+            min_col=merge["min_col"],
+            min_row=merge["min_row_offset"] + 1,
+            max_col=merge["max_col"],
+            max_row=merge["max_row_offset"] + 1,
+        )
+        for row_offset in range(merge["min_row_offset"], merge["max_row_offset"] + 1):
+            for col_idx in range(merge["min_col"], merge["max_col"] + 1):
+                border_schema = _edge_border_schema(
+                    anchor["borders"], cell_range, row_offset + 1, col_idx
+                )
+                if border_schema is None and not (
+                    row_offset == merge["min_row_offset"]
+                    and col_idx == merge["min_col"]
+                ):
+                    continue
+                edge_cell = dict(anchor)
+                edge_cell["coordinate"] = f"{get_column_letter(col_idx)}{row_offset + 1}"
+                edge_cell["value"] = (
+                    anchor["value"]
+                    if row_offset == merge["min_row_offset"]
+                    and col_idx == merge["min_col"]
+                    else None
+                )
+                edge_cell["cell_type"] = (
+                    anchor["cell_type"]
+                    if row_offset == merge["min_row_offset"]
+                    and col_idx == merge["min_col"]
+                    else "empty"
+                )
+                if border_schema is not None:
+                    edge_cell["borders"] = border_schema
+                cells_by_offset.setdefault(row_offset, {})[col_idx] = edge_cell  # type: ignore[assignment]
+
+
+def _repeat_merges_starting_at(
+    merges: list[dict[str, Any]], offset: int
+) -> list[dict[str, Any]]:
+    return [merge for merge in merges if merge["min_row_offset"] == offset]
+
+
+def _repeat_content_rows(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    base_cells: dict[int, CellSchema],
+    anchors: list[dict[str, Any]],
+    *,
+    batch_size: int,
+) -> Iterator[dict[str, Any]]:
+    if len(anchors) > 1:
+        raise ValueError(
+            "Repeat sections support one dataframe-content placeholder per template row in v1."
+        )
+    anchor = anchors[0]
+    source = source_map[anchor["source"]]
+    wrote = False
+    for row_values in _source_rows(bundle, source, batch_size=batch_size):
+        row_cells = dict(base_cells) if not wrote else {}
+        for offset, value in enumerate(row_values):
+            col_idx = anchor["start_col"] + offset
+            content_cell = dict(anchor["cell"])
+            content_cell["value"] = value
+            content_cell["cell_type"] = _infer_cell_type(value)
+            row_cells[col_idx] = content_cell  # type: ignore[assignment]
+        wrote = True
+        yield {"cells": row_cells, "merges": []}
+    if not wrote:
+        yield {"cells": base_cells, "merges": []}
 
 
 def _is_non_anchor_merged_cell(cell: CellSchema) -> bool:
@@ -419,6 +656,9 @@ def _is_non_anchor_merged_cell(cell: CellSchema) -> bool:
 
 
 def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int) -> bool:
+    if plan.get("repeat_rows") is not None:
+        return _write_repeat_streaming_sheet(ws, plan, max_rows_per_workbook)
+
     content = plan["content"]
     anchor = content["anchor"] if content is not None else None
     max_col = plan["max_col"]
@@ -453,6 +693,42 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
             ws.append(row_cells)
             row_idx += 1
     return wrote_content
+
+
+def _write_repeat_streaming_sheet(
+    ws, plan: dict[str, Any], max_rows_per_workbook: int
+) -> bool:
+    max_col = plan["max_col"]
+    col_count = max_col - plan["min_col"] + 1
+    wrote_any = False
+    row_idx = 1
+    while row_idx <= max_rows_per_workbook:
+        try:
+            row_item = next(plan["repeat_rows"])
+        except StopIteration:
+            plan["content"]["exhausted"] = True
+            break
+        row_map = row_item["cells"]
+        for merge in row_item["merges"]:
+            max_merge_row = row_idx + merge["max_row_offset"] - merge["min_row_offset"]
+            if max_merge_row <= max_rows_per_workbook:
+                ws.merged_cells.add(
+                    CellRange(
+                        min_col=merge["min_col"],
+                        min_row=row_idx,
+                        max_col=merge["max_col"],
+                        max_row=max_merge_row,
+                    )
+                )
+        row_cells = [None] * col_count
+        for col_idx, schema in row_map.items():
+            if col_idx < plan["min_col"] or col_idx > max_col:
+                continue
+            row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, schema)
+        ws.append(row_cells)
+        wrote_any = True
+        row_idx += 1
+    return wrote_any
 
 
 def _fill_streaming_row(

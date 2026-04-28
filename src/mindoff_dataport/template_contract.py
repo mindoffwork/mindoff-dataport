@@ -25,8 +25,9 @@ PLACEHOLDER_RE = re.compile(r"\{\{(\w+):([\w-]+)\}\}")
 SHEET_NAME_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 _DATAFRAME_TYPES = frozenset(["dataframe", "dataframe-header", "dataframe-content"])
+_REPEAT_TYPES = frozenset(["repeat-start", "repeat-end"])
 _SCALAR_TYPES = frozenset(["string", "number", "int", "float", "date", "boolean"])
-_ALL_TYPES = _SCALAR_TYPES | _DATAFRAME_TYPES
+_ALL_TYPES = _SCALAR_TYPES | _DATAFRAME_TYPES | _REPEAT_TYPES
 
 _EMPTY_BORDER_SIDE = {"style": None, "color": None}
 _DEFAULT_FONT: FontSchema = {
@@ -56,7 +57,7 @@ _DEFAULT_BORDERS: CellBorders = {
 
 
 def _validate_data(
-    placeholders: dict[str, str], data: dict[str, Any], scope_label: str
+    placeholders: dict[str, Any], data: dict[str, Any], scope_label: str
 ) -> None:
     for key, expected_type in placeholders.items():
         if key not in data:
@@ -64,6 +65,9 @@ def _validate_data(
                 f"Sheet '{scope_label}' requires '{key}' (type: {expected_type}) "
                 "but it was not provided in data"
             )
+        if isinstance(expected_type, list):
+            _check_repeat_payload(key, data[key], expected_type, scope_label)
+            continue
         _check_type(key, data[key], expected_type)
 
 
@@ -97,12 +101,35 @@ def _assert_dataframe(key: str, value: Any) -> None:
     )
 
 
+def _check_repeat_payload(
+    key: str, value: Any, expected: list[dict[str, str]], scope_label: str
+) -> None:
+    if not isinstance(value, list):
+        raise TypeError(
+            f"Repeat section '{key}' in sheet '{scope_label}' must be a list, got {type(value).__name__}"
+        )
+    item_contract = expected[0] if expected else {}
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise TypeError(
+                f"Repeat section '{key}' item {index} in sheet '{scope_label}' must be an object/dict, "
+                f"got {type(item).__name__}"
+            )
+        _validate_data(item_contract, item, f"{scope_label}.{key}[{index}]")
+
+
 def _merge_placeholder_types(
-    base: dict[str, str], incoming: dict[str, str], scope_label: str
-) -> dict[str, str]:
-    merged: dict[str, str] = dict(base)
+    base: dict[str, Any], incoming: dict[str, Any], scope_label: str
+) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
     for key, type_ in incoming.items():
         existing = merged.get(key)
+        if isinstance(existing, list) or isinstance(type_, list):
+            if existing != type_:
+                raise ValueError(
+                    f"Conflicting repeat placeholder contract for '{key}' in scope '{scope_label}'"
+                )
+            continue
         if existing in _DATAFRAME_TYPES and type_ in _DATAFRAME_TYPES:
             merged[key] = "dataframe"
             continue
@@ -115,15 +142,54 @@ def _merge_placeholder_types(
     return merged
 
 
-def _collect_sheet_placeholders(sheet: SheetSchema) -> dict[str, str]:
+def _collect_sheet_placeholders(sheet: SheetSchema) -> dict[str, Any]:
+    repeats = _repeat_sections(sheet)
+    if not repeats:
+        return _collect_placeholders_in_rows(sheet, None, None)
+
+    outer: dict[str, Any] = {}
+    cursor = 1
+    for repeat in repeats:
+        outer = _merge_placeholder_types(
+            outer,
+            _collect_placeholders_in_rows(sheet, cursor, repeat["start_row"] - 1),
+            sheet["name"],
+        )
+        inner = _collect_placeholders_in_rows(
+            sheet, repeat["start_row"] + 1, repeat["end_row"] - 1
+        )
+        if repeat["key"] in outer:
+            raise ValueError(
+                f"Duplicate repeat section key '{repeat['key']}' is not allowed in sheet '{sheet['name']}'"
+        )
+        outer[repeat["key"]] = [inner]
+        cursor = repeat["end_row"] + 1
+    outer = _merge_placeholder_types(
+        outer,
+        _collect_placeholders_in_rows(sheet, cursor, None),
+        sheet["name"],
+    )
+    return outer
+
+
+def _collect_placeholders_in_rows(
+    sheet: SheetSchema, min_row: int | None, max_row: int | None
+) -> dict[str, str]:
     found: dict[str, str] = {}
     scope_label = sheet["name"]
     for cell_schema in sheet["cells"].values():
+        _, row_idx = coordinate_from_string(cell_schema["coordinate"])
+        if min_row is not None and row_idx < min_row:
+            continue
+        if max_row is not None and row_idx > max_row:
+            continue
         value = cell_schema.get("value")
         if not isinstance(value, str):
             continue
         for match in PLACEHOLDER_RE.finditer(value):
             key, placeholder_type = match.group(1), match.group(2)
+            if placeholder_type in _REPEAT_TYPES:
+                continue
             if placeholder_type not in _ALL_TYPES:
                 continue
             existing = found.get(key)
@@ -137,6 +203,82 @@ def _collect_sheet_placeholders(sheet: SheetSchema) -> dict[str, str]:
                 )
             found[key] = placeholder_type
     return found
+
+
+def _repeat_section(sheet: SheetSchema) -> dict[str, Any] | None:
+    sections = _repeat_sections(sheet)
+    if not sections:
+        return None
+    if len(sections) > 1:
+        raise ValueError("Multiple repeat sections were found; use _repeat_sections")
+    return sections[0]
+
+
+def _repeat_sections(sheet: SheetSchema) -> list[dict[str, Any]]:
+    markers: list[dict[str, Any]] = []
+    for cell in sheet["cells"].values():
+        value = cell.get("value")
+        if not isinstance(value, str):
+            continue
+        match = PLACEHOLDER_RE.fullmatch(value.strip())
+        if not match or match.group(2) not in _REPEAT_TYPES:
+            continue
+        _, row_idx = coordinate_from_string(cell["coordinate"])
+        markers.append(
+            {
+                "key": match.group(1),
+                "type": match.group(2),
+                "row": row_idx,
+                "coordinate": cell["coordinate"],
+            }
+        )
+
+    if not markers:
+        return []
+
+    sections: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for marker in sorted(markers, key=lambda item: (item["row"], item["coordinate"])):
+        if marker["type"] == "repeat-start":
+            if stack:
+                raise ValueError("Nested repeat sections are not supported")
+            if marker["key"] in seen_keys:
+                raise ValueError(
+                    f"Duplicate repeat section key '{marker['key']}' is not allowed"
+                )
+            stack.append(marker)
+            continue
+
+        if not stack:
+            raise ValueError(
+                f"Repeat section '{marker['key']}' repeat-end appears before repeat-start"
+            )
+        start = stack.pop()
+        if start["key"] != marker["key"]:
+            raise ValueError(
+                f"Repeat section markers must use the same key, got '{start['key']}' and '{marker['key']}'"
+            )
+        if start["row"] >= marker["row"]:
+            raise ValueError(
+                f"Repeat section '{start['key']}' repeat-start must appear before repeat-end"
+            )
+        seen_keys.add(start["key"])
+        sections.append(
+            {
+                "key": start["key"],
+                "start_row": start["row"],
+                "end_row": marker["row"],
+                "start_coordinate": start["coordinate"],
+                "end_coordinate": marker["coordinate"],
+            }
+        )
+
+    if stack:
+        raise ValueError(
+            f"Repeat section '{stack[-1]['key']}' requires a repeat-end marker"
+        )
+    return sections
 
 
 def _sheet_name_placeholder(name: str) -> str | None:
@@ -163,11 +305,11 @@ def _require_dict_payload(
 
 def _resolve_sheet_payloads(
     schema: WorkbookSchema, data: dict[str, Any]
-) -> list[tuple[SheetSchema, str, dict[str, Any], dict[str, str]]]:
+) -> list[tuple[SheetSchema, str, dict[str, Any], dict[str, Any]]]:
     if not isinstance(data, dict):
         raise TypeError(f"Data must be an object/dict, got {type(data).__name__}")
 
-    resolved: list[tuple[SheetSchema, str, dict[str, Any], dict[str, str]]] = []
+    resolved: list[tuple[SheetSchema, str, dict[str, Any], dict[str, Any]]] = []
     output_names: set[str] = set()
 
     for sheet in schema["sheets"]:

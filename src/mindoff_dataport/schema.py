@@ -81,6 +81,7 @@ class SheetSchema(_SheetSchemaRequired, total=False):
     row_height_mode: Literal["fixed", "even", "hug"]
     default_row_height: float  # height applied to every row in "even" mode
     show_gridlines: bool
+    repeat_sections: list[dict]
 
 
 class WorkbookSchema(TypedDict):

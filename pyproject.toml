@@ -12,6 +12,16 @@ dependencies = ["openpyxl>=3.1.0", "pyarrow>=15.0", "reportlab>=4.0"]
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
+[tool.coverage.run]
+source = ["mindoff_dataport"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+omit = ["src/tests/*", "examples/*"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mindoff_dataport"]
 

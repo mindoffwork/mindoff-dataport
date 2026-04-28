@@ -1,5 +1,7 @@
 """Tests for column_width_mode and row_height_mode."""
 
+import datetime
+
 import openpyxl
 import pytest
 
@@ -153,6 +155,53 @@ def test_fixed_mode_uses_explicit_widths(managed_tmp_dir):
     wb = _build_and_reload(schema, managed_tmp_dir)
     ws = wb.active
     assert ws.column_dimensions["A"].width == pytest.approx(42.0)
+    wb.close()
+
+
+def test_xlsx_export_preserves_cell_styles_and_date_values(managed_tmp_dir):
+    styled = _minimal_cell("A1", "Styled")
+    styled["font"] = {
+        "name": "Calibri",
+        "size": 14.0,
+        "bold": True,
+        "italic": True,
+        "underline": "single",
+        "color": "FFFF0000",
+    }
+    styled["fill"] = {"bg_color": "FF00FF00"}
+    styled["alignment"] = {
+        "horizontal": "center",
+        "vertical": "bottom",
+        "wrap_text": True,
+    }
+    styled["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thick", "color": "FF000000"},
+        "left": {"style": "medium", "color": "FF000000"},
+        "right": {"style": "dashed", "color": "FF000000"},
+    }
+    date_cell = _minimal_cell("A2", "2024-01-02T03:04:05")
+    date_cell["cell_type"] = "date"
+    date_cell["number_format"] = "yyyy-mm-dd hh:mm"
+    schema = {"sheets": [_minimal_sheet({"A1": styled, "A2": date_cell})]}
+
+    wb = _build_and_reload(schema, managed_tmp_dir)
+    ws = wb.active
+
+    assert ws["A1"].font.bold is True
+    assert ws["A1"].font.italic is True
+    assert ws["A1"].font.underline == "single"
+    assert ws["A1"].font.color.rgb == "FFFF0000"
+    assert ws["A1"].fill.fgColor.rgb == "FF00FF00"
+    assert ws["A1"].alignment.horizontal == "center"
+    assert ws["A1"].alignment.vertical == "bottom"
+    assert ws["A1"].alignment.wrap_text is True
+    assert ws["A1"].border.top.style == "thin"
+    assert ws["A1"].border.bottom.style == "thick"
+    assert ws["A1"].border.left.style == "medium"
+    assert ws["A1"].border.right.style == "dashed"
+    assert ws["A2"].value == datetime.datetime(2024, 1, 2, 3, 4, 5)
+    assert ws["A2"].number_format == "yyyy-mm-dd hh:mm"
     wb.close()
 
 

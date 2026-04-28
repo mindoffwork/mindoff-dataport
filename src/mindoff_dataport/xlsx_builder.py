@@ -19,7 +19,7 @@ from .schema import (
     FontSchema,
     SheetSchema,
 )
-from .utils import argb_to_color, dict_to_border_side
+from .style_conversion import argb_to_color, dict_to_border_side
 
 # §1 Constants & Exceptions
 

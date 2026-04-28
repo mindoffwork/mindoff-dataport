@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import re
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +18,15 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, TableStyle
 
 from .bundle import ReportBundle
-from .renderer import _parse_dims
+from .template_contract import _parse_dims
 from .schema import CellSchema, SheetSchema
 from .xlsx_renderer import (
     _content_cells,
     _data_source_map,
     _expanded_sheet_from_manifest,
     _header_cells,
+    _repeat_record_rows,
+    _static_row_merges,
     _sheet_with_overrides,
 )
 
@@ -70,6 +73,57 @@ class _FontResolver:
                 italic=bool(font.get("italic")),
             )
         return _builtin_font_name(font)
+
+
+class _LazyFlowables:
+    def __init__(self, flowables: Iterable[Any]) -> None:
+        self._iterator = iter(flowables)
+        self._buffer: list[Any] = []
+        self._done = False
+
+    def _fill(self) -> None:
+        if self._buffer or self._done:
+            return
+        self._append_next()
+
+    def _fill_to(self, index: int) -> None:
+        while len(self._buffer) <= index and not self._done:
+            self._append_next()
+
+    def _append_next(self) -> None:
+        try:
+            self._buffer.append(next(self._iterator))
+        except StopIteration:
+            self._done = True
+
+    def __len__(self) -> int:
+        self._fill()
+        return 1 if self._buffer else 0
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            if index.stop is not None and index.stop > 0:
+                self._fill_to(index.stop - 1)
+            else:
+                self._fill()
+            return self._buffer[index]
+        self._fill_to(index)
+        return self._buffer[index]
+
+    def __delitem__(self, index) -> None:
+        self._fill()
+        if isinstance(index, slice):
+            del self._buffer[index]
+        else:
+            del self._buffer[index]
+
+    def __setitem__(self, index, value) -> None:
+        self._fill()
+        self._buffer[index] = value
+
+    def insert(self, index: int, value) -> None:
+        self._fill()
+        self._buffer.insert(index, value)
 
 
 # Â§3 Private Helper Functions
@@ -501,6 +555,51 @@ def _merged_border_commands(
     return commands
 
 
+def _merged_style_commands(
+    sheet: SheetSchema,
+    cells: dict[tuple[int, int], CellSchema],
+    min_col: int,
+    min_row: int,
+    max_col: int,
+    max_row: int,
+    font_resolver: _FontResolver,
+) -> list[tuple[Any, ...]]:
+    commands: list[tuple[Any, ...]] = []
+    for raw_region in sheet.get("merged_regions", []):
+        region = CellRange(raw_region)
+        if (
+            region.min_col < min_col
+            or region.min_row < min_row
+            or region.max_col > max_col
+            or region.max_row > max_row
+        ):
+            continue
+        anchor = cells.get((region.min_row, region.min_col))
+        if anchor is None:
+            continue
+        start = (region.min_col - min_col, region.min_row - min_row)
+        end = (region.max_col - min_col, region.max_row - min_row)
+        font = anchor["font"]
+        fill = anchor["fill"]
+        alignment = anchor["alignment"]
+
+        commands.append(("FONTNAME", start, end, font_resolver.font_name(font)))
+        commands.append(("FONTSIZE", start, end, float(font.get("size") or 11.0)))
+        font_color = _hex_color(font.get("color"))
+        if font_color is not None:
+            commands.append(("TEXTCOLOR", start, end, font_color))
+        fill_color = _hex_color(fill.get("bg_color"))
+        if fill_color is not None:
+            commands.append(("BACKGROUND", start, end, fill_color))
+        commands.append(("ALIGN", start, end, _alignment(alignment.get("horizontal"))))
+        commands.append(("VALIGN", start, end, _vertical_alignment(alignment.get("vertical"))))
+        commands.append(("LEFTPADDING", start, end, 4))
+        commands.append(("RIGHTPADDING", start, end, 4))
+        commands.append(("TOPPADDING", start, end, 3))
+        commands.append(("BOTTOMPADDING", start, end, 3))
+    return commands
+
+
 def _table_style(
     sheet: SheetSchema,
     cells: dict[tuple[int, int], CellSchema],
@@ -525,6 +624,11 @@ def _table_style(
                 min_col,
                 font_resolver,
             )
+    commands.extend(
+        _merged_style_commands(
+            sheet, cells, min_col, min_row, max_col, max_row, font_resolver
+        )
+    )
     commands.extend(
         _merged_border_commands(sheet, cells, min_col, min_row, max_col, max_row)
     )
@@ -578,6 +682,239 @@ def _sheet_table(
     return table
 
 
+def _repeat_sheet_flowables(
+    bundle: ReportBundle,
+    raw_sheet: dict[str, Any],
+    *,
+    available_width: float,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    streaming_chunk_rows: int,
+    font_resolver: _FontResolver,
+) -> Iterator[Any]:
+    sheet = _sheet_with_overrides(
+        raw_sheet,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+    )
+    source_map = _data_source_map(bundle)
+    min_col, min_row, max_col, _ = _parse_dims(sheet["dimensions"])
+    max_col = _repeat_max_col(sheet, max_col)
+    chunk: list[dict[str, Any]] = []
+    cursor = min_row
+
+    for section in sheet["repeat_sections"]:
+        for row_item in _static_pdf_rows(sheet, cursor, section["start_row"] - 1):
+            if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
+                yield _row_chunk_table(
+                    sheet,
+                    chunk,
+                    min_col,
+                    max_col,
+                    available_width,
+                    font_resolver,
+                )
+                chunk = []
+            chunk.append(row_item)
+            if len(chunk) >= streaming_chunk_rows:
+                yield _row_chunk_table(
+                    sheet,
+                    chunk,
+                    min_col,
+                    max_col,
+                    available_width,
+                    font_resolver,
+                )
+                chunk = []
+        for record in section["records"]:
+            for row_item in _repeat_record_rows(
+                bundle,
+                source_map,
+                record,
+                block_height=section["block_height"],
+                merges=section.get("merged_regions", []),
+                batch_size=streaming_chunk_rows,
+            ):
+                if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
+                    yield _row_chunk_table(
+                        sheet,
+                        chunk,
+                        min_col,
+                        max_col,
+                        available_width,
+                        font_resolver,
+                    )
+                    chunk = []
+                chunk.append(row_item)
+                if len(chunk) >= streaming_chunk_rows:
+                    yield _row_chunk_table(
+                        sheet,
+                        chunk,
+                        min_col,
+                        max_col,
+                        available_width,
+                        font_resolver,
+                    )
+                    chunk = []
+        cursor = section["end_row"] + 1
+
+    _, _, _, max_row = _parse_dims(sheet["dimensions"])
+    for row_item in _static_pdf_rows(sheet, cursor, max_row):
+        if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+            )
+            chunk = []
+        chunk.append(row_item)
+        if len(chunk) >= streaming_chunk_rows:
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+            )
+            chunk = []
+
+    if chunk:
+        yield _row_chunk_table(
+            sheet,
+            chunk,
+            min_col,
+            max_col,
+            available_width,
+            font_resolver,
+        )
+
+
+def _sheet_flowables(
+    bundle: ReportBundle,
+    raw_sheet: dict[str, Any],
+    *,
+    available_width: float,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    streaming_chunk_rows: int,
+    font_resolver: _FontResolver,
+) -> Iterator[Any]:
+    if raw_sheet.get("repeat_sections"):
+        yield from _repeat_sheet_flowables(
+            bundle,
+            raw_sheet,
+            available_width=available_width,
+            column_width_mode=column_width_mode,
+            row_height_mode=row_height_mode,
+            default_column_width=default_column_width,
+            default_row_height=default_row_height,
+            streaming_chunk_rows=streaming_chunk_rows,
+            font_resolver=font_resolver,
+        )
+        return
+    yield _sheet_table(
+        bundle,
+        raw_sheet,
+        available_width=available_width,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+        streaming_chunk_rows=streaming_chunk_rows,
+        font_resolver=font_resolver,
+    )
+
+
+def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
+    max_col = current
+    for section in sheet.get("repeat_sections", []):
+        for record in section["records"]:
+            for item in record["cells"]:
+                max_col = max(max_col, item["start_col"])
+            for anchor in record["dataframe_anchors"]:
+                max_col = max(
+                    max_col,
+                    anchor["start_col"] + max(len(anchor["columns"]) - 1, 0),
+                )
+    return max_col
+
+
+def _row_item_merge_height(row_item: dict[str, Any]) -> int:
+    height = 1
+    for merge in row_item.get("merges", []):
+        height = max(height, merge["max_row_offset"] - merge["min_row_offset"] + 1)
+    return height
+
+
+def _static_pdf_rows(
+    sheet: SheetSchema, start_row: int, end_row: int
+) -> Iterator[dict[str, Any]]:
+    if end_row < start_row:
+        return
+    for row_idx in range(start_row, end_row + 1):
+        row_cells: dict[int, CellSchema] = {}
+        for cell in sheet["cells"].values():
+            cell_row, col_idx = _coord_indexes(cell["coordinate"])
+            if cell_row == row_idx:
+                row_cells[col_idx] = cell
+        yield {"cells": row_cells, "merges": _static_row_merges(sheet, row_idx)}
+
+
+def _row_chunk_table(
+    sheet: SheetSchema,
+    rows: list[dict[str, Any]],
+    min_col: int,
+    max_col: int,
+    available_width: float,
+    font_resolver: _FontResolver,
+) -> Table:
+    cells: dict[tuple[int, int], CellSchema] = {}
+    merged_regions: list[str] = []
+    for row_offset, row_item in enumerate(rows, start=1):
+        row_map = row_item["cells"]
+        for col_idx, cell in row_map.items():
+            adjusted = dict(cell)
+            adjusted["coordinate"] = f"{_col_letter(col_idx)}{row_offset}"
+            cells[(row_offset, col_idx)] = adjusted  # type: ignore[assignment]
+        for merge in row_item.get("merges", []):
+            max_row = row_offset + merge["max_row_offset"] - merge["min_row_offset"]
+            if max_row <= len(rows):
+                merged_regions.append(
+                    f"{_col_letter(merge['min_col'])}{row_offset}:"
+                    f"{_col_letter(merge['max_col'])}{max_row}"
+                )
+    data = _table_data(cells, font_resolver, min_col, 1, max_col, len(rows))
+    chunk_sheet = dict(sheet)
+    chunk_sheet["merged_regions"] = merged_regions
+    table = Table(
+        data,
+        colWidths=_column_widths(
+            chunk_sheet,
+            cells,
+            min_col,
+            1,
+            max_col,
+            len(rows),
+            available_width,
+        ),
+        rowHeights=None,
+        repeatRows=0,
+        splitByRow=1,
+    )
+    table.setStyle(_table_style(chunk_sheet, cells, min_col, 1, max_col, len(rows), font_resolver))
+    return table
+
+
 def _ensure_output_parent(output_path: str) -> None:
     parent = Path(output_path).parent
     if parent and not parent.exists():
@@ -621,12 +958,11 @@ def export_report_bundle(
         bottomMargin=margin,
     )
     available_width = pagesize[0] - (margin * 2)
-    story: list[Any] = []
-    for index, raw_sheet in enumerate(bundle.report["sheets"]):
-        if index:
-            story.append(PageBreak())
-        story.append(
-            _sheet_table(
+    def flowables() -> Iterator[Any]:
+        for index, raw_sheet in enumerate(bundle.report["sheets"]):
+            if index:
+                yield PageBreak()
+            yield from _sheet_flowables(
                 bundle,
                 raw_sheet,
                 available_width=available_width,
@@ -637,8 +973,8 @@ def export_report_bundle(
                 streaming_chunk_rows=streaming_chunk_rows,
                 font_resolver=font_resolver,
             )
-        )
-    doc.build(story)
+
+    doc.build(_LazyFlowables(flowables()))
 
 
 # Â§5 Entrypoints

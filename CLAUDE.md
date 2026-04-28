@@ -26,7 +26,7 @@ Rules:
 - Project: `mindoff_dataport`
 - Import package: `mindoff_dataport`
 - Flow: `extract_template(.xlsx) -> schema -> compile_report_bundle(...) -> export_report_bundle(...)`
-- Main modules: `schema.py`, `extractor.py`, `bundle.py`, `xlsx_renderer.py`, `pdf_renderer.py`, `builder.py`, `renderer.py`, `utils.py`
+- Main modules: `schema.py`, `extractor.py`, `template_contract.py`, `bundle.py`, `xlsx_renderer.py`, `pdf_renderer.py`, `xlsx_builder.py`, `style_conversion.py`
 
 ## 3) Public API
 
@@ -44,14 +44,16 @@ Stable unless explicitly changed:
 Notes:
 
 - `ReportBundle` directory is the canonical intermediate artifact.
-- `report.json` resolves scalar/static cells and stores dataframe anchors; it must not expand dataframe rows into cell schemas.
+- `report.json` resolves scalar/static cells and stores dataframe anchors/repeat plans; it must not expand dataframe rows into cell schemas.
 - `pyarrow>=15.0` is required; dataframe sources are stored as `data/*.parquet`.
 - Polars `LazyFrame` is the disk-backed input for larger-than-RAM data; use `pl.scan_parquet(...)` for Parquet inputs.
 - `format="xlsx"` and `format="pdf"` are implemented. `format="image"` raises `NotImplementedError`.
 - PDF export uses ReportLab, starts each sheet on a new page, and paginates overflow rows vertically.
 - PDF export supports optional custom TrueType/OpenType fonts via the `fonts` option.
 - PDF export draws only template borders; it must not add a default grid over empty spacer cells.
-- `builder.py` contains XLSX style/sizing helper functions used by `xlsx_renderer.py`.
+- `template_contract.py` owns placeholder discovery, input contracts, payload validation, scalar substitution, and sheet payload resolution.
+- `xlsx_builder.py` contains XLSX style/sizing helper functions used by `xlsx_renderer.py`.
+- `style_conversion.py` contains openpyxl color/border conversion helpers.
 - Current input contract is sheet-scoped data, not flat key/value payloads.
 - XLSX export supports `export_mode="fidelity" | "streaming"` and streaming may return `list[str]`.
 
@@ -65,7 +67,7 @@ Notes:
 - Preserve sheet gridline visibility via `show_gridlines`.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
-- Streaming limits: no `hug`, no merged cells intersecting dataframe-content output, one `dataframe-content` placeholder per sheet.
+- Streaming limits: no `hug`, no merged cells intersecting dataframe-content output, one `dataframe-content` placeholder per non-repeat sheet.
 
 ## 5) Sizing
 
@@ -81,6 +83,7 @@ Supported:
 
 - Scalars: `string`, `number`, `date`
 - Dataframes: `dataframe`, `dataframe-header`, `dataframe-content`
+- Repeats: `repeat-start`, `repeat-end`
 
 Behavior:
 
@@ -92,6 +95,8 @@ Behavior:
 - `dataframe-header` writes headers only.
 - `dataframe-content` writes rows only.
 - Streaming writes `dataframe-content` incrementally from parquet batches.
+- Single-sheet repeats use `{{key:repeat-start}}` / `{{key:repeat-end}}` and require an ordered list of record payloads.
+- Repeat v1 supports one or more non-overlapping sibling vertical sections per sheet, no nesting, unique repeat keys, static rows before/between/after sections, and merged cells only in fixed repeat/static rows, not `dataframe-content` rows.
 - `auto_delete_bundle=True` deletes the bundle directory only after successful export.
 
 ## 7) Tests
@@ -100,6 +105,12 @@ Default:
 
 ```bash
 PYTHONPATH=src python -m pytest -q
+```
+
+Coverage gate:
+
+```bash
+PYTHONPATH=src python -m pytest --cov=mindoff_dataport --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=90
 ```
 
 Run in order:
@@ -153,7 +164,7 @@ Use `# §N Name` sections in Python files.
 - Use them for meaningful steps like parse, validate, transform, write, batch, finalize.
 - Prefer `# §3.1 Parse sheet metadata` style comments when a phase matters.
 - Keep tests under `src/tests/` aligned by test filename with implementation modules when practical.
-- Cross-reference by section label, for example `renderer.py §4.2`.
+- Cross-reference by section label, for example `template_contract.py §4.2`.
 
 ## 12) Git Commit Standard
 

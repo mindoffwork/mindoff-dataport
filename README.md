@@ -10,6 +10,7 @@ Recommended entrypoint: `from mindoff_dataport import mode as mo_dataport`
 - Discover typed template inputs from placeholders such as `{{key:type}}`
 - Compile template + runtime data into a portable `ReportBundle` directory
 - Store dataframe sources under `data/*` without expanding rows into `report.json`
+- Render ordered repeated sections into one sheet without materializing dataframe rows
 - Export the bundle to `.xlsx` or styled `.pdf`, with a reserved `image` interface
 
 ## Install
@@ -142,8 +143,48 @@ Supported placeholder types:
 
 - Scalars: `string`, `number`, `int`, `float`, `date`, `boolean`
 - Dataframes: `dataframe`, `dataframe-header`, `dataframe-content`
+- Repeats: `repeat-start`, `repeat-end`
 
 Use `polars.scan_parquet(path)` when the source data starts as Parquet and should remain lazy until compilation.
+
+### Single-Sheet Repeated Sections
+
+Use repeat markers when one template block should be rendered many times in the
+same sheet. The rows between the markers are repeated; marker rows are control
+rows and are not rendered. A sheet may contain multiple non-overlapping sibling
+repeat sections, processed in template row order.
+
+```text
+{{reports:repeat-start}}
+Customer: {{customer_name:string}}
+{{line_items:dataframe-header}}
+{{line_items:dataframe-content}}
+{{reports:repeat-end}}
+```
+
+```python
+bundle = mo_dataport.compile(
+    template,
+    {
+        "Sheet1": {
+            "reports": [
+                {"customer_name": "Acme", "line_items": acme_rows},
+                {"customer_name": "Globex", "line_items": globex_rows},
+                {"customer_name": "Initech", "line_items": initech_rows},
+            ]
+        }
+    },
+)
+
+mo_dataport.export(bundle, "combined.xlsx", export_mode="streaming")
+mo_dataport.export(bundle, "combined.pdf", format="pdf", streaming_chunk_rows=5000)
+```
+
+Repeat v1 supports ordered list payloads, one or more sibling vertical sections
+per sheet, static rows before/between/after sections, unique repeat keys, and no
+nested repeats. Merged cells are supported in fixed repeat/static rows, but not
+over streamed `dataframe-content` rows. Dataframe content remains parquet-backed
+and is streamed in batches for XLSX and PDF output.
 
 ## Demo
 

@@ -7,7 +7,7 @@ from .bundle import (
     compile_report_bundle as _compile_report_bundle_impl,
 )
 from .extractor import extract_template as _extract_template_impl
-from .renderer import get_template_inputs as _get_template_inputs_impl
+from .template_contract import get_template_inputs as _get_template_inputs_impl
 from .schema import WorkbookSchema
 from .xlsx_renderer import export_report_bundle as _export_report_bundle_impl
 
