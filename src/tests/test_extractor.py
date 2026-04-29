@@ -1,7 +1,9 @@
 ﻿import json
 
 import openpyxl
+import pytest
 from openpyxl.styles import Border, Side
+from openpyxl.utils.cell import get_column_letter
 
 from mindoff_dataport import extract_template
 
@@ -131,6 +133,23 @@ def test_column_widths_captured(workbook_schema):
     widths = workbook_schema["sheets"][0]["column_widths"]
     assert "A" in widths
     assert abs(widths["A"] - 20.0) < 0.5
+
+
+def test_column_dimension_ranges_are_expanded(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "Range width"
+    sheet.column_dimensions["C"].width = 31.25
+    sheet.column_dimensions["C"].min = 3
+    sheet.column_dimensions["C"].max = 12
+    path = managed_tmp_dir / "range-width.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    widths = schema["sheets"][0]["column_widths"]
+    for col_idx in range(3, 13):
+        assert widths[get_column_letter(col_idx)] == pytest.approx(31.25)
 
 
 def test_sheet_gridline_visibility_captured(managed_tmp_dir):

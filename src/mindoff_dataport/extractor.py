@@ -59,11 +59,7 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
             cells[cell.coordinate] = _extract_cell(cell, merge_map)
     _apply_merged_region_borders(ws, cells)
 
-    column_widths = {
-        col: ws.column_dimensions[col].width
-        for col in ws.column_dimensions
-        if ws.column_dimensions[col].width is not None
-    }
+    column_widths = _extract_column_widths(ws)
     row_heights = {
         str(row_idx): ws.row_dimensions[row_idx].height
         for row_idx in ws.row_dimensions
@@ -90,6 +86,19 @@ def _build_merge_map(ws: Worksheet) -> dict[str, str]:
             for col in range(merged_range.min_col, merged_range.max_col + 1):
                 result[f"{get_column_letter(col)}{row}"] = anchor
     return result
+
+
+def _extract_column_widths(ws: Worksheet) -> dict[str, float]:
+    widths: dict[str, float] = {}
+    for col_letter, dimension in ws.column_dimensions.items():
+        width = dimension.width
+        if width is None:
+            continue
+        min_col = dimension.min or 1
+        max_col = dimension.max or min_col
+        for col_idx in range(min_col, max_col + 1):
+            widths[get_column_letter(col_idx)] = width
+    return widths
 
 
 def _extract_cell(cell: Cell | MergedCell, merge_map: dict[str, str]) -> CellSchema:
