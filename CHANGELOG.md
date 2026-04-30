@@ -1,5 +1,10 @@
 <h1>Release Notes</h1>
 
+## Recent Changes
+
+### Fixes
+- 🔧 Improve XLSX streaming layout handling ([#1](https://github.com/mindoffwork/mindoff-dataport/pull/1))
+
 ## v0.1.0
 
 ### Enhancements
