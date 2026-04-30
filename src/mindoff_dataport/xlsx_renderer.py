@@ -245,7 +245,7 @@ def _render_fidelity(
 
         for region in sheet["merged_regions"]:
             ws.merge_cells(region)
-        _apply_merged_region_borders(ws, sheet)
+        _apply_merged_region_borders(ws, sheet, cells)
 
         if sheet.get("column_width_mode", "fixed") == "hug":
             _apply_hug_columns(ws, _dimensioned_sheet(sheet, max_col, max_row))
@@ -778,12 +778,14 @@ def _repeat_content_rows(
     for row_values in _source_rows(bundle, source, batch_size=batch_size):
         row_cells = dict(base_cells) if not wrote else {}
         for layout, value in zip(layouts, row_values):
-            col_idx = anchor["start_col"] + layout["start_col_offset"]
-            content_cell = dict(anchor["cell"])
-            content_cell["value"] = value
-            content_cell["cell_type"] = _infer_cell_type(value)
-            content_cell["alignment"] = _layout_alignment(anchor["cell"], layout)
-            row_cells[col_idx] = content_cell  # type: ignore[assignment]
+            row_cells.update(
+                _layout_row_cells(
+                    anchor,
+                    layout,
+                    row_idx=1,
+                    value=value,
+                )
+            )
         wrote = True
         yield {"cells": row_cells, "merges": (base_merges or []) + _anchor_row_merges(anchor, 1)}
     if not wrote:
@@ -893,16 +895,63 @@ def _fill_streaming_row(
     if plan["sheet"].get("row_height_mode", "fixed") == "fixed":
         _apply_fixed_dataframe_row_height_streaming(ws, plan["sheet"], anchor, row_idx)
     for layout, value in zip(layouts, row_values):
-        col_idx = anchor["start_col"] + layout["start_col_offset"]
-        if col_idx < plan["min_col"] or col_idx > plan["max_col"]:
-            continue
-        row_cells[col_idx - plan["min_col"]] = _styled_write_only_cell(
-            ws, _cell_with_layout(anchor["cell"], layout), value
-        )
+        for col_idx, cell_schema in _layout_row_cells(
+            anchor,
+            layout,
+            row_idx=row_idx,
+            value=value,
+        ).items():
+            if col_idx < plan["min_col"] or col_idx > plan["max_col"]:
+                continue
+            row_cells[col_idx - plan["min_col"]] = _styled_write_only_cell(
+                ws,
+                cell_schema,
+                cell_schema["value"],
+            )
         merge_range = _layout_merge_range(anchor, layout, row_idx)
         if merge_range is not None:
             ws.merged_cells.add(merge_range)
     return True
+
+
+def _layout_row_cells(
+    anchor: dict[str, Any],
+    layout: dict[str, Any],
+    *,
+    row_idx: int,
+    value: Any,
+) -> dict[int, CellSchema]:
+    start_col = int(anchor["start_col"]) + int(layout["start_col_offset"])
+    schema = _cell_with_layout(anchor["cell"], layout)
+    occupation = int(layout["occupation"])
+    if occupation <= 1:
+        first = dict(schema)
+        first["value"] = value
+        first["cell_type"] = _infer_cell_type(value)
+        return {start_col: first}  # type: ignore[return-value]
+
+    merge_range = _layout_merge_range(anchor, layout, row_idx)
+    if merge_range is None:
+        first = dict(schema)
+        first["value"] = value
+        first["cell_type"] = _infer_cell_type(value)
+        return {start_col: first}  # type: ignore[return-value]
+
+    result: dict[int, CellSchema] = {}
+    end_col = start_col + occupation - 1
+    for col_idx in range(start_col, end_col + 1):
+        item = dict(schema)
+        border_schema = _edge_border_schema(item["borders"], merge_range, row_idx, col_idx)
+        if border_schema is not None:
+            item["borders"] = border_schema
+        if col_idx == start_col:
+            item["value"] = value
+            item["cell_type"] = _infer_cell_type(value)
+        else:
+            item["value"] = None
+            item["cell_type"] = "empty"
+        result[col_idx] = item  # type: ignore[assignment]
+    return result
 
 
 def _cell_with_layout(schema: CellSchema, layout: dict[str, Any]) -> CellSchema:
@@ -930,12 +979,18 @@ def _write_only_cell(ws, schema: CellSchema) -> WriteOnlyCell:
     return cell
 
 
-def _apply_merged_region_borders(ws, sheet: SheetSchema) -> None:
+def _apply_merged_region_borders(
+    ws, sheet: SheetSchema, cells: dict[tuple[int, int], CellSchema] | None = None
+) -> None:
     for region in sheet.get("merged_regions", []):
         cell_range = CellRange(region)
-        anchor = sheet["cells"].get(
-            f"{get_column_letter(cell_range.min_col)}{cell_range.min_row}"
-        )
+        anchor = None
+        if cells is not None:
+            anchor = cells.get((cell_range.min_row, cell_range.min_col))
+        if anchor is None:
+            anchor = sheet["cells"].get(
+                f"{get_column_letter(cell_range.min_col)}{cell_range.min_row}"
+            )
         if anchor is None:
             continue
         for row in range(cell_range.min_row, cell_range.max_row + 1):
