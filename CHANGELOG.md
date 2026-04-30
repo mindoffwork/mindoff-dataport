@@ -5,6 +5,9 @@
 ### Fixes
 - 🔧 Improve XLSX streaming layout handling ([#1](https://github.com/mindoffwork/mindoff-dataport/pull/1))
 
+### Documentation
+- 📝 Refresh README documentation ([#2](https://github.com/mindoffwork/mindoff-dataport/pull/2))
+
 ## v0.1.0
 
 ### Enhancements
