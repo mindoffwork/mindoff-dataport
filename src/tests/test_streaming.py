@@ -377,6 +377,34 @@ def test_streaming_writes_dataframe_occupation_merges_and_alignment(managed_tmp_
     wb.close()
 
 
+def test_streaming_applies_occupation_merge_border_style_for_all_rows(
+    managed_tmp_dir: Path,
+):
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thin", "color": "FF000000"},
+        "left": {"style": "thin", "color": "FF000000"},
+        "right": {"style": "thin", "color": "FF000000"},
+    }
+    schema = _schema({"A1": anchor}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Amount": [12, 34]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Amount": {"occupation": 2}}}}},
+    )
+
+    out = managed_tmp_dir / "occupied-border.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1", "A2:B2"]
+    assert ws["B1"].border.right.style == "thin"
+    assert ws["B2"].border.right.style == "thin"
+    wb.close()
+
+
 def test_streaming_writes_header_occupation_merges(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{headers:dataframe-header}}")}, dims="A1:A1")
     bundle = mo_dataport.compile(
@@ -424,6 +452,34 @@ def test_fidelity_exports_file_backed_dataframe_with_occupation(managed_tmp_dir:
     assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1"]
     assert ws["A1"].value == 12
     assert ws["A1"].alignment.horizontal == "right"
+    wb.close()
+
+
+def test_fidelity_applies_occupation_merge_border_style_for_all_dataframe_rows(
+    managed_tmp_dir: Path,
+):
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thin", "color": "FF000000"},
+        "left": {"style": "thin", "color": "FF000000"},
+        "right": {"style": "thin", "color": "FF000000"},
+    }
+    schema = _schema({"A1": anchor}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Amount": [12, 34]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Amount": {"occupation": 2}}}}},
+    )
+    out = managed_tmp_dir / "fidelity-borders.xlsx"
+
+    mo_dataport.export(bundle, str(out), export_mode="fidelity")
+
+    wb = openpyxl.load_workbook(out)
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1", "A2:B2"]
+    assert ws["B1"].border.right.style == "thin"
+    assert ws["B2"].border.right.style == "thin"
     wb.close()
 
 

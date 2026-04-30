@@ -60,6 +60,7 @@ Notes:
 - `merged_regions` is authoritative during build, except renderer-owned dataframe `occupation` merges generated from anchor metadata.
 - XLSX/PDF must consume the same resolved dataframe layout/style plan; PDF differences are limited to supplied font availability and deterministic page scaling.
 - Merged-cell borders must render around the full merged region, not only the anchor cell.
+- Renderer-generated dataframe `occupation` merges must apply anchor border styling on every generated row, not only the first row.
 - Preserve formulas (`data_only=False`).
 - Bundle compilation must not mutate input templates.
 - Use `fgColor` for solid fills.
