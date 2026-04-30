@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.1.0
 
 ### Enhancements
 - ✨ Add parquet-backed PDF and XLSX export support
