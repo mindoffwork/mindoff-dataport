@@ -1,62 +1,86 @@
-# Mindoff Dataport
+<h1>Mindoff Dataport</h1>
 
-Extract Excel templates, compile runtime data into a portable `ReportBundle`, and render production `.xlsx` or `.pdf` files with layout and styling faithfully preserved.
+_Build high-fidelity Excel and PDF reports from reusable `.xlsx` templates._
 
----
+Mindoff Dataport turns styled Excel workbooks into reusable report templates, compiles runtime data into a portable `ReportBundle`, and exports production-ready `.xlsx` and `.pdf` outputs while preserving layout, structure, and visual fidelity.
 
-## Table of Contents
+[![Coverage Status](https://codecov.io/gh/mindoffwork/mindoff-dataport/branch/root/graph/badge.svg)](https://codecov.io/gh/mindoffwork/mindoff-dataport)
+[![PyPI version](https://img.shields.io/pypi/v/mindoff-dataport.svg?logo=pypi&logoColor=white)](https://pypi.org/project/mindoff-dataport/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://github.com/mindoffwork/mindoff-dataport/actions/workflows/root_ci.yml)
 
-1. [What It Does](#what-it-does)
-2. [Install](#install)
-3. [Quick Start](#quick-start)
-4. [Core Concepts](#core-concepts)
-5. [API Reference](#api-reference)
-6. [Template Placeholders](#template-placeholders)
-7. [Data Contract](#data-contract)
-8. [Export Options](#export-options)
-9. [Dataframe Column Layout](#dataframe-column-layout)
-10. [Sizing Options](#sizing-options)
-11. [Supported Styling](#supported-styling)
-12. [Custom Fonts for PDF](#custom-fonts-for-pdf)
-13. [ReportBundle Directory](#reportbundle-directory)
-14. [Recipes](#recipes)
+## Key Features
 
----
+1. **Template-First Report Generation**  
+   Turn real Excel workbooks into reusable report templates without rebuilding layouts in code.
 
-## What It Does
+2. **Compile Once. Export Natively to XLSX and PDF.**  
+   Build reports once and export polished `.xlsx` and `.pdf` outputs from the same source with consistent fidelity.
 
-- Extracts an `.xlsx` workbook into a typed template schema by reading cell styles, dimensions, merged regions, and placeholder markers
-- Discovers what inputs a template needs from `{{key:type}}` placeholders
-- Compiles template + runtime data into a portable `ReportBundle`—dataframe sources remain as Parquet files and are never expanded into the schema
-- Supports per-dataframe column occupation and horizontal alignment through `dataframe_options`
-- Renders repeating sections within one sheet without materialising all rows in memory
-- Exports the bundle to `.xlsx` (fidelity or streaming) or a styled `.pdf`, with layout and cell styling preserved
+3. **Dataframes Plug Directly Into Templates**  
+   Connect dataframe inputs directly to templates so report generation fits naturally into modern data workflows.
+
+4. **Built for Large Exports Without Memory Bloat**  
+   Export large datasets with confidence, without turning memory usage into a bottleneck.
+
+5. **Flexible Repeating and Dynamic Sheets**  
+   Generate repeated sections and dynamic sheets for customer-wise, region-wise, or report-wise output from a single template system.
+
+6. **Runtime Layout Control Without Template Rework**  
+   Fine-tune output layout programmatically without redesigning the original workbook.
+
+**Source**: [https://github.com/mindoffwork/mindoff-dataport](https://github.com/mindoffwork/mindoff-dataport)
 
 ---
 
-## Install
+## Documentation
+### Table of Contents
+
+1. [Purpose](#1-purpose)
+2. [Install](#2-install)
+3. [Quick Start](#3-quick-start)
+4. [Core Concepts](#4-core-concepts)
+5. [API Reference](#5-api-reference)
+6. [Template Placeholders](#6-template-placeholders)
+7. [Data Contract](#7-data-contract)
+8. [Export Options](#8-export-options)
+9. [Dataframe Column Layout](#9-dataframe-column-layout)
+10. [Sizing Options](#10-sizing-options)
+11. [Supported Styling](#11-supported-styling)
+12. [Custom Fonts for PDF](#12-custom-fonts-for-pdf)
+13. [ReportBundle Directory](#13-reportbundle-directory)
+14. [Recipes](#14-recipes)
+15. [Current Scope](#15-current-scope)
+16. [License](#16-license)
+
+---
+
+## 1. Purpose
+
+Mindoff Dataport is built to turn Excel-based report designs into reusable, data-driven outputs with a template format that is convenient to create, review, and maintain.
+
+- Reuse existing Excel report layouts instead of rebuilding them from scratch in code.
+- Fill those layouts with live business data and keep the final output polished and presentation-ready.
+- Generate both Excel and PDF from the same report source, so teams do not maintain separate reporting flows.
+- Scale one template into many outputs, whether that means repeated sections, multiple sheets, or report variants for different audiences.
+- Support larger exports more reliably as report volume grows.
+
+---
+
+## 2. Install
 
 ```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -e .
+pip install mindoff-dataport
 ```
 
 For dataframe support (required when passing Polars DataFrames or LazyFrames):
 
 ```bash
-pip install polars
+pip install "mindoff-dataport[polars]"
 ```
 
 ---
 
-## Quick Start
+## 3. Quick Start
 
 ```python
 import polars as pl
@@ -97,7 +121,7 @@ mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 
 ---
 
-## Core Concepts
+## 4. Core Concepts
 
 ### Workflow
 
@@ -141,7 +165,7 @@ from mindoff_dataport import (
 
 ---
 
-## API Reference
+## 5. API Reference
 
 ### `extract(path)` — `extract_template(path)`
 
@@ -211,7 +235,7 @@ Renders the bundle to a file. Accepts an in-memory `ReportBundle` or a path to a
 
 ---
 
-## Template Placeholders
+## 6. Template Placeholders
 
 Mark cells in your `.xlsx` template using the `{{key:type}}` syntax. The extractor reads these markers and builds the input contract.
 
@@ -267,7 +291,7 @@ See [Repeat Sections](#repeat-sections) for usage.
 
 ---
 
-## Data Contract
+## 7. Data Contract
 
 Payloads are **sheet-scoped**. The top-level key must match the sheet name in the template.
 
@@ -348,13 +372,13 @@ Polars `LazyFrame` inputs remain disk-backed until export time; rows are never f
 
 ---
 
-## Export Options
+## 8. Export Options
 
 All options are passed as keyword arguments to `export()`.
 
 ---
 
-## Dataframe Column Layout
+## 9. Dataframe Column Layout
 
 Use `dataframe_options` during `compile()` to control how dataframe columns occupy template columns and to override horizontal alignment per generated column.
 
@@ -447,7 +471,7 @@ PDF-specific options are passed as keyword arguments alongside sizing options.
 
 ---
 
-## Sizing Options
+## 10. Sizing Options
 
 Sizing modes control how column widths and row heights are computed at render time.
 
@@ -483,7 +507,7 @@ Kwargs passed to `export()` override values stored in the template schema.
 
 ---
 
-## Supported Styling
+## 11. Supported Styling
 
 Styles are defined in the `.xlsx` template itself. The library extracts them during `extract()` and reapplies them faithfully at export time. No runtime style configuration is needed.
 
@@ -542,7 +566,7 @@ The template's `show_gridlines` property is preserved in XLSX output.
 
 ---
 
-## Custom Fonts for PDF
+## 12. Custom Fonts for PDF
 
 By default the PDF renderer maps all cell fonts to ReportLab's built-in **Helvetica** family. To use your own TrueType or OpenType fonts, pass a `fonts` dict to `export()`.
 
@@ -611,7 +635,7 @@ fonts={
 
 ---
 
-## ReportBundle Directory
+## 13. ReportBundle Directory
 
 When `bundle_path` is passed to `compile()`, the bundle is persisted as a directory. The same directory can be re-loaded and re-exported without rerunning `compile()`.
 
@@ -638,7 +662,7 @@ Setting `auto_delete_bundle=True` in `export()` deletes the bundle directory aft
 
 ---
 
-## Recipes
+## 14. Recipes
 
 ### Scalar Values + Dataframe Table
 
@@ -831,7 +855,7 @@ mo_dataport.export(
 
 ---
 
-## Current Scope
+## 15. Current Scope
 
 | Feature                  | Status                             |
 |--------------------------|------------------------------------|
@@ -843,3 +867,9 @@ mo_dataport.export(
 | Image export             | Reserved — raises `NotImplementedError` in v1 |
 | Nested repeat sections   | Not supported in v1                |
 | Patterned fills          | Not extracted or rendered          |
+
+---
+
+## 16. License
+
+Released under the [MIT License](https://github.com/mindoffwork/mindoff-dataport/blob/root/LICENSE).
