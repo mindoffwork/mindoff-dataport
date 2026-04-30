@@ -47,12 +47,14 @@ def compile_report_bundle(
     data: dict[str, Any],
     bundle_path: str | None = None,
     dataframe_options: dict[str, Any] | None = None,
+    dataframe_shift: Literal["both", "horizontal", "vertical", "none"] = "both",
 ) -> ReportBundle:
     return _compile_report_bundle_impl(
         template,
         data,
         bundle_path=bundle_path,
         dataframe_options=dataframe_options,
+        dataframe_shift=dataframe_shift,
     )
 
 

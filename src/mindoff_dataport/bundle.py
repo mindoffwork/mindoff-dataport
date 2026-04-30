@@ -40,6 +40,7 @@ __all__ = [
 
 BUNDLE_VERSION = "1.0"
 _ALIGNMENTS = frozenset({"left", "center", "right"})
+_DATAFRAME_SHIFT_MODES = frozenset({"both", "horizontal", "vertical", "none"})
 
 # §2. Classes and Sub Classes
 
@@ -188,6 +189,7 @@ def _compile_sheet(
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
     dataframe_options: dict[str, Any],
+    dataframe_shift: str,
 ) -> dict[str, Any]:
     repeats = _repeat_sections(sheet)
     if repeats:
@@ -307,6 +309,7 @@ def _compile_sheet(
     result["dimensions"] = dimensions
     result["cells"] = static_cells
     result["dataframe_anchors"] = anchors
+    _shift_template_content_around_dataframes(result, dataframe_shift=dataframe_shift)
     _validate_template_merges_do_not_overlap_dataframes(result)
     return result
 
@@ -743,6 +746,203 @@ def _occupied_width(column_layouts: list[dict[str, Any]]) -> int:
     return int(last["start_col_offset"]) + int(last["occupation"])
 
 
+def _shift_template_content_around_dataframes(
+    sheet: dict[str, Any], *, dataframe_shift: str
+) -> None:
+    if dataframe_shift == "none":
+        return
+    footprints = _dataframe_shift_footprints(sheet.get("dataframe_anchors", []))
+    if not footprints:
+        return
+
+    _validate_dataframe_anchors_are_not_template_merged(sheet, footprints)
+    merge_shifts: dict[tuple[int, int], tuple[int, int]] = {}
+    shifted_merges: list[str] = []
+    for region in sheet.get("merged_regions", []):
+        merge_range = CellRange(region)
+        row_shift, col_shift = _shift_for_range(
+            merge_range, footprints, dataframe_shift=dataframe_shift
+        )
+        shifted = _shift_range(merge_range, row_shift, col_shift)
+        shifted_merges.append(str(shifted))
+        for row_idx in range(merge_range.min_row, merge_range.max_row + 1):
+            for col_idx in range(merge_range.min_col, merge_range.max_col + 1):
+                merge_shifts[(row_idx, col_idx)] = (row_shift, col_shift)
+
+    shifted_cells: dict[str, CellSchema] = {}
+    for cell in sheet["cells"].values():
+        row_idx, col_idx = _coord_indexes(cell["coordinate"])
+        row_shift, col_shift = merge_shifts.get(
+            (row_idx, col_idx),
+            _shift_for_cell(
+                row_idx, col_idx, footprints, dataframe_shift=dataframe_shift
+            ),
+        )
+        new_cell = _shift_cell(cell, row_shift, col_shift)
+        shifted_cells[new_cell["coordinate"]] = new_cell
+
+    sheet["merged_regions"] = shifted_merges
+    sheet["cells"] = shifted_cells
+    _refresh_dimensions(sheet)
+
+
+def _dataframe_shift_footprints(
+    anchors: list[dict[str, Any]],
+) -> list[dict[str, int]]:
+    grouped: dict[tuple[str, str, int], dict[str, int]] = {}
+    for anchor in anchors:
+        output_range = _dataframe_output_range(anchor)
+        if output_range is None:
+            continue
+        key = (anchor["coordinate"], anchor["key"], int(anchor["start_col"]))
+        item = grouped.get(key)
+        if item is None:
+            grouped[key] = {
+                "start_row": output_range.min_row,
+                "start_col": output_range.min_col,
+                "max_row": output_range.max_row,
+                "max_col": output_range.max_col,
+                "row_delta": 0,
+                "col_delta": output_range.max_col - output_range.min_col,
+            }
+            continue
+        item["start_row"] = min(item["start_row"], output_range.min_row)
+        item["max_row"] = max(item["max_row"], output_range.max_row)
+        item["max_col"] = max(item["max_col"], output_range.max_col)
+        item["col_delta"] = max(
+            item["col_delta"], output_range.max_col - output_range.min_col
+        )
+
+    footprints = list(grouped.values())
+    for item in footprints:
+        item["row_delta"] = item["max_row"] - item["start_row"]
+    return footprints
+
+
+def _validate_dataframe_anchors_are_not_template_merged(
+    sheet: dict[str, Any], footprints: list[dict[str, int]]
+) -> None:
+    if not sheet.get("merged_regions"):
+        return
+    for region in sheet["merged_regions"]:
+        merge_range = CellRange(region)
+        for footprint in footprints:
+            if (
+                merge_range.min_col <= footprint["start_col"] <= merge_range.max_col
+                and merge_range.min_row <= footprint["start_row"] <= merge_range.max_row
+            ):
+                raise ValueError(
+                    "Template merged regions must not overlap dataframe output ranges"
+                )
+
+
+def _shift_for_range(
+    region: CellRange, footprints: list[dict[str, int]], *, dataframe_shift: str
+) -> tuple[int, int]:
+    row_shift = 0
+    col_shift = 0
+    for footprint in footprints:
+        if dataframe_shift in {"both", "horizontal"} and _range_is_right_of_footprint(
+            region, footprint
+        ):
+            col_shift += footprint["col_delta"]
+        if dataframe_shift in {"both", "vertical"} and _range_is_below_footprint(
+            region, footprint
+        ):
+            row_shift += footprint["row_delta"]
+    return row_shift, col_shift
+
+
+def _shift_for_cell(
+    row_idx: int,
+    col_idx: int,
+    footprints: list[dict[str, int]],
+    *,
+    dataframe_shift: str,
+) -> tuple[int, int]:
+    row_shift = 0
+    col_shift = 0
+    for footprint in footprints:
+        if (
+            dataframe_shift in {"both", "horizontal"}
+            and footprint["start_row"] <= row_idx <= footprint["max_row"]
+            and col_idx > footprint["start_col"]
+        ):
+            col_shift += footprint["col_delta"]
+        if (
+            dataframe_shift in {"both", "vertical"}
+            and footprint["start_col"] <= col_idx <= footprint["max_col"]
+            and row_idx > footprint["start_row"]
+        ):
+            row_shift += footprint["row_delta"]
+    return row_shift, col_shift
+
+
+def _range_is_right_of_footprint(
+    region: CellRange, footprint: dict[str, int]
+) -> bool:
+    return (
+        region.min_row <= footprint["max_row"]
+        and region.max_row >= footprint["start_row"]
+        and region.min_col > footprint["start_col"]
+    )
+
+
+def _range_is_below_footprint(
+    region: CellRange, footprint: dict[str, int]
+) -> bool:
+    return (
+        region.min_col <= footprint["max_col"]
+        and region.max_col >= footprint["start_col"]
+        and region.min_row > footprint["start_row"]
+    )
+
+
+def _shift_range(region: CellRange, row_shift: int, col_shift: int) -> CellRange:
+    return CellRange(
+        min_col=region.min_col + col_shift,
+        min_row=region.min_row + row_shift,
+        max_col=region.max_col + col_shift,
+        max_row=region.max_row + row_shift,
+    )
+
+
+def _shift_cell(cell: CellSchema, row_shift: int, col_shift: int) -> CellSchema:
+    if row_shift == 0 and col_shift == 0:
+        return cell
+    row_idx, col_idx = _coord_indexes(cell["coordinate"])
+    new_cell: dict[str, Any] = dict(cell)
+    new_cell["coordinate"] = f"{get_column_letter(col_idx + col_shift)}{row_idx + row_shift}"
+    merge_anchor = cell.get("merge_anchor")
+    if merge_anchor is not None:
+        anchor_row, anchor_col = _coord_indexes(merge_anchor)
+        new_cell["merge_anchor"] = (
+            f"{get_column_letter(anchor_col + col_shift)}{anchor_row + row_shift}"
+        )
+    return new_cell  # type: ignore[return-value]
+
+
+def _refresh_dimensions(sheet: dict[str, Any]) -> None:
+    min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
+    for coord in sheet["cells"]:
+        row_idx, col_idx = _coord_indexes(coord)
+        max_col = max(max_col, col_idx)
+        max_row = max(max_row, row_idx)
+    for region in sheet.get("merged_regions", []):
+        merge_range = CellRange(region)
+        max_col = max(max_col, merge_range.max_col)
+        max_row = max(max_row, merge_range.max_row)
+    for anchor in sheet.get("dataframe_anchors", []):
+        output_range = _dataframe_output_range(anchor)
+        if output_range is None:
+            continue
+        max_col = max(max_col, output_range.max_col)
+        max_row = max(max_row, output_range.max_row)
+    sheet["dimensions"] = (
+        f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
+    )
+
+
 def _validate_template_merges_do_not_overlap_dataframes(sheet: dict[str, Any]) -> None:
     if not sheet.get("merged_regions"):
         return
@@ -834,6 +1034,13 @@ def _ranges_overlap(left: CellRange, right: CellRange) -> bool:
     )
 
 
+def _validate_dataframe_shift_mode(dataframe_shift: str) -> None:
+    if dataframe_shift not in _DATAFRAME_SHIFT_MODES:
+        raise ValueError(
+            "dataframe_shift must be one of 'both', 'horizontal', 'vertical', or 'none'"
+        )
+
+
 # §4. Public Functions
 
 
@@ -842,8 +1049,10 @@ def compile_report_bundle(
     data: dict[str, Any],
     bundle_path: str | None = None,
     dataframe_options: dict[str, Any] | None = None,
+    dataframe_shift: str = "both",
 ) -> ReportBundle:
     """Validate *data* against *template* and produce a directory ReportBundle."""
+    _validate_dataframe_shift_mode(dataframe_shift)
     bundle_dir = _prepare_bundle_dir(bundle_path)
     data_sources: list[dict[str, Any]] = []
     used_ids: set[str] = set()
@@ -859,6 +1068,7 @@ def compile_report_bundle(
             used_ids=used_ids,
             source_cache=source_cache,
             dataframe_options=dataframe_options or {},
+            dataframe_shift=dataframe_shift,
         )
         for sheet, output_name, sheet_data, _ in _resolve_sheet_payloads(template, data)
     ]

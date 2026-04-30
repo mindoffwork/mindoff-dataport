@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Fixes
+- Add configurable dataframe collision shifting during compile
 - 🔧 Improve XLSX streaming layout handling ([#1](https://github.com/mindoffwork/mindoff-dataport/pull/1))
 
 ### Documentation

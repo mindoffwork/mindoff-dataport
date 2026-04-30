@@ -793,7 +793,11 @@ def _chunked_row_tables(
 ) -> Iterator[Table]:
     chunk: list[dict[str, Any]] = []
     for row_item in row_items:
-        if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
+        if (
+            chunk
+            and _chunk_merges_fit(chunk)
+            and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows
+        ):
             yield _row_chunk_table(
                 sheet,
                 chunk,
@@ -805,7 +809,7 @@ def _chunked_row_tables(
             )
             chunk = []
         chunk.append(row_item)
-        if len(chunk) >= streaming_chunk_rows:
+        if len(chunk) >= streaming_chunk_rows and _chunk_merges_fit(chunk):
             yield _row_chunk_table(
                 sheet,
                 chunk,
@@ -1057,6 +1061,15 @@ def _row_item_merge_height(row_item: dict[str, Any]) -> int:
     for merge in row_item.get("merges", []):
         height = max(height, merge["max_row_offset"] - merge["min_row_offset"] + 1)
     return height
+
+
+def _chunk_merges_fit(rows: list[dict[str, Any]]) -> bool:
+    for row_offset, row_item in enumerate(rows, start=1):
+        for merge in row_item.get("merges", []):
+            max_row = row_offset + merge["max_row_offset"] - merge["min_row_offset"]
+            if max_row > len(rows):
+                return False
+    return True
 
 
 def _static_pdf_rows(

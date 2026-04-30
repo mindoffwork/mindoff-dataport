@@ -135,6 +135,37 @@ def test_streaming_reads_lazyframe_source_in_batches(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_streaming_keeps_lazyframe_rows_out_of_report(managed_tmp_dir: Path):
+    source_path = managed_tmp_dir / "source.parquet"
+    polars.DataFrame({"A": [1, 2, 3]}).write_parquet(source_path)
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.scan_parquet(source_path)}},
+        bundle_path=str(managed_tmp_dir / "bundle"),
+    )
+
+    sheet = bundle.report["sheets"][0]
+    anchor = sheet["dataframe_anchors"][0]
+    assert sheet["cells"] == {}
+    assert anchor["source_rows"] == 3
+    assert anchor["source"].startswith("data/")
+
+    out = managed_tmp_dir / "lazy-stream.xlsx"
+    paths = mo_dataport.export(
+        bundle,
+        str(out),
+        export_mode="streaming",
+        streaming_chunk_rows=1,
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [ws["A1"].value, ws["A2"].value, ws["A3"].value] == [1, 2, 3]
+    wb.close()
+
+
 def test_streaming_rejects_hug_mode(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
     df = polars.DataFrame({"A": [1]})
