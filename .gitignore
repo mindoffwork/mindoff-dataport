@@ -50,6 +50,7 @@ Thumbs.db
 CLAUDE.md
 claude.md
 AGENTS.md
+rewrite_author.sh
 
 # Generated example outputs
 examples/output/*
