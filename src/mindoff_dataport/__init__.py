@@ -46,8 +46,14 @@ def compile_report_bundle(
     template: WorkbookSchema,
     data: dict[str, Any],
     bundle_path: str | None = None,
+    dataframe_options: dict[str, Any] | None = None,
 ) -> ReportBundle:
-    return _compile_report_bundle_impl(template, data, bundle_path=bundle_path)
+    return _compile_report_bundle_impl(
+        template,
+        data,
+        bundle_path=bundle_path,
+        dataframe_options=dataframe_options,
+    )
 
 
 def export_report_bundle(

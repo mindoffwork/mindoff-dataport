@@ -14,11 +14,12 @@ Extract Excel templates, compile runtime data into a portable `ReportBundle`, an
 6. [Template Placeholders](#template-placeholders)
 7. [Data Contract](#data-contract)
 8. [Export Options](#export-options)
-9. [Sizing Options](#sizing-options)
-10. [Supported Styling](#supported-styling)
-11. [Custom Fonts for PDF](#custom-fonts-for-pdf)
-12. [ReportBundle Directory](#reportbundle-directory)
-13. [Recipes](#recipes)
+9. [Dataframe Column Layout](#dataframe-column-layout)
+10. [Sizing Options](#sizing-options)
+11. [Supported Styling](#supported-styling)
+12. [Custom Fonts for PDF](#custom-fonts-for-pdf)
+13. [ReportBundle Directory](#reportbundle-directory)
+14. [Recipes](#recipes)
 
 ---
 
@@ -27,6 +28,7 @@ Extract Excel templates, compile runtime data into a portable `ReportBundle`, an
 - Extracts an `.xlsx` workbook into a typed template schema by reading cell styles, dimensions, merged regions, and placeholder markers
 - Discovers what inputs a template needs from `{{key:type}}` placeholders
 - Compiles template + runtime data into a portable `ReportBundle`—dataframe sources remain as Parquet files and are never expanded into the schema
+- Supports per-dataframe column occupation and horizontal alignment through `dataframe_options`
 - Renders repeating sections within one sheet without materialising all rows in memory
 - Exports the bundle to `.xlsx` (fidelity or streaming) or a styled `.pdf`, with layout and cell styling preserved
 
@@ -57,6 +59,7 @@ pip install polars
 ## Quick Start
 
 ```python
+import polars as pl
 from mindoff_dataport import mo_dataport
 
 # 1. Extract the template
@@ -67,6 +70,13 @@ required_inputs = mo_dataport.inputs(template)
 # {'Invoice': {'customer_name': 'string', 'invoice_number': 'number', 'line_items': 'dataframe'}}
 
 # 3. Compile: bind data to the template
+polars_dataframe = pl.DataFrame(
+    {
+        "item": ["Widget A", "Widget B"],
+        "amount": [125, 275],
+    }
+)
+
 bundle = mo_dataport.compile(
     template,
     data={
@@ -169,15 +179,16 @@ Example output:
 
 ---
 
-### `compile(template, data, bundle_path=None)` — `compile_report_bundle(...)`
+### `compile(template, data, bundle_path=None, dataframe_options=None)` - `compile_report_bundle(...)`
 
 Binds runtime data to the template, validates all inputs against the sheet contract, materialises Polars DataFrames / LazyFrames to Parquet, and produces a `ReportBundle`.
 
-| Parameter     | Type                        | Required | Description                                                                         |
-|---------------|-----------------------------|----------|-------------------------------------------------------------------------------------|
-| `template`    | `WorkbookSchema`            | Yes      | Schema from `extract()`                                                             |
-| `data`        | `dict[str, Any]`            | Yes      | Sheet-scoped payload. See [Data Contract](#data-contract)                           |
-| `bundle_path` | `str \| None`               | No       | If provided, writes the bundle as a directory at this path. Omit for in-memory only |
+| Parameter           | Type                     | Required | Description                                                                                 |
+|---------------------|--------------------------|----------|---------------------------------------------------------------------------------------------|
+| `template`          | `WorkbookSchema`         | Yes      | Schema from `extract()`                                                                     |
+| `data`              | `dict[str, Any]`         | Yes      | Sheet-scoped payload. See [Data Contract](#data-contract)                                   |
+| `bundle_path`       | `str \| None`            | No       | If provided, writes the bundle as a directory at this path. Omit for in-memory only         |
+| `dataframe_options` | `dict[str, Any] \| None` | No       | Per-sheet, per-placeholder dataframe layout overrides. See [Dataframe Column Layout](#dataframe-column-layout) |
 
 **Returns:** `ReportBundle`
 
@@ -196,7 +207,7 @@ Renders the bundle to a file. Accepts an in-memory `ReportBundle` or a path to a
 | `format`         | `str`                 | No       | `"xlsx"`  | Output format: `"xlsx"`, `"pdf"`. (`"image"` is reserved; raises `NotImplementedError`) |
 | `**options`      | —                     | No       | —         | Sizing and format-specific options. See [Export Options](#export-options)       |
 
-**Returns:** `None` for `"fidelity"` XLSX and all PDF exports. `list[str]` of output file paths for `"streaming"` XLSX (one path per workbook part).
+**Returns:** `None` for `"fidelity"` XLSX and all PDF exports. `list[str]` for `"streaming"` XLSX: one workbook path when no split is needed, or one `.zip` path when the export is split across workbooks.
 
 ---
 
@@ -275,11 +286,11 @@ Payloads are **sheet-scoped**. The top-level key must match the sheet name in th
 
 ### Dynamic Sheet Group
 
-When a template sheet name contains `{{key}}` in the sheet tab name, it becomes a template for multiple output sheets. Pass a dict of `output_sheet_name → payload` keyed under the template sheet name.
+When a template sheet name is exactly `{{key}}`, it becomes a template for multiple output sheets. Pass a dict of `output_sheet_name -> payload` keyed under that placeholder key.
 
 ```python
 {
-    "region_sheet": {                          # template sheet name
+    "region_sheet": {                          # sheet-name placeholder key
         "North Sheet": {                       # → output sheet name
             "region_name": "North",
             "owner": "Alice",
@@ -295,6 +306,20 @@ When a template sheet name contains `{{key}}` in the sheet tab name, it becomes 
 ```
 
 Output sheet order follows the payload dict insertion order.
+
+`inputs(schema)` reports dynamic sheet groups under the same placeholder key:
+
+```python
+{
+    "region_sheet": {
+        "*": {
+            "region_name": "string",
+            "owner": "string",
+            "sales_rows": "dataframe",
+        }
+    }
+}
+```
 
 ### Repeat Section
 
@@ -327,6 +352,58 @@ Polars `LazyFrame` inputs remain disk-backed until export time; rows are never f
 
 All options are passed as keyword arguments to `export()`.
 
+---
+
+## Dataframe Column Layout
+
+Use `dataframe_options` during `compile()` to control how dataframe columns occupy template columns and to override horizontal alignment per generated column.
+
+The structure is:
+
+```python
+dataframe_options = {
+    "Sheet Name": {
+        "placeholder_key": {
+            "columns": {
+                "Column Name": {"occupation": 2, "alignment": "left"},
+            }
+        }
+    }
+}
+```
+
+For templates that split headers and rows across separate placeholders, configure each placeholder independently:
+
+```python
+dataframe_options = {
+    "Column Layout": {
+        "headers": {
+            "columns": {
+                "Employee Name": {"occupation": 2, "alignment": "center"},
+                "Department": {"occupation": 2, "alignment": "center"},
+                "Amount": {"occupation": 1, "alignment": "center"},
+            }
+        },
+        "rows": {
+            "columns": {
+                "Employee Name": {"occupation": 2, "alignment": "left"},
+                "Department": {"occupation": 2, "alignment": "center"},
+                "Amount": {"occupation": 1, "alignment": "right"},
+            }
+        },
+    }
+}
+```
+
+Rules:
+
+- `occupation` must be a positive integer
+- `alignment` must be one of `"left"`, `"center"`, or `"right"`
+- Options are keyed by resolved output sheet name, then placeholder key
+- Unconfigured dataframe columns default to `occupation=1` and keep the template cell alignment
+
+---
+
 ### XLSX Options
 
 | Option                  | Type    | Default       | Description                                                                              |
@@ -346,7 +423,7 @@ All options are passed as keyword arguments to `export()`.
 - No merged cells intersecting `dataframe-content` output rows
 - Only one `dataframe-content` placeholder per non-repeat sheet
 
-**Split output:** When `max_rows_per_workbook` is exceeded in streaming mode, `export()` returns a `list[str]` of paths (`output.part001.xlsx`, `output.part002.xlsx`, …) wrapped in a `.zip` archive written to `output_path`.
+**Split output:** When `max_rows_per_workbook` is exceeded in streaming mode, `export()` writes workbook parts, bundles them into `output.zip`, deletes the individual part files, and returns a one-item `list[str]` containing the zip path.
 
 ---
 
@@ -361,8 +438,8 @@ PDF-specific options are passed as keyword arguments alongside sizing options.
 | `margin`                | `float`           | `36`          | Page margin in points (≥ 0). Applied equally on all four sides       |
 | `streaming_chunk_rows`  | `int`             | `50000`       | Rows read per batch for `dataframe-content` and repeat sections      |
 | `fonts`                 | `dict \| None`    | `None`        | Custom TrueType / OpenType font families. See [Custom Fonts for PDF](#custom-fonts-for-pdf) |
-| `column_width_mode`     | `str`             | schema value  | Same as XLSX                                                         |
-| `row_height_mode`       | `str`             | schema value  | Same as XLSX                                                         |
+| `column_width_mode`     | `str`             | schema value  | Same as XLSX. For sheets with `dataframe-content`, PDF supports `"fixed"` and `"even"` only |
+| `row_height_mode`       | `str`             | schema value  | Same as XLSX. PDF also supports `"hug"` for `dataframe-content` row height |
 | `default_column_width`  | `float`           | schema value  | Same as XLSX                                                         |
 | `default_row_height`    | `float`           | schema value  | Same as XLSX                                                         |
 
@@ -382,6 +459,8 @@ Sizing modes control how column widths and row heights are computed at render ti
 | `"even"`  | Applies `default_column_width` uniformly to all columns    | Ignores per-column template widths       |
 | `"hug"`   | Computes width from cell content at render time            | Not available in streaming mode          |
 
+For PDF sheets that render `dataframe-content`, `column_width_mode="hug"` is not supported because it would require buffering all rows before sizing.
+
 ### Row Height Modes
 
 | Mode      | Source                                                     | Limitation                              |
@@ -389,6 +468,8 @@ Sizing modes control how column widths and row heights are computed at render ti
 | `"fixed"` | Reads heights stored in the template schema per row        | Requires heights to be set in the template |
 | `"even"`  | Applies `default_row_height` uniformly to all rows         | Ignores per-row template heights         |
 | `"hug"`   | Auto-fits row height to content                            | Not available in streaming mode          |
+
+For PDF sheets that render `dataframe-content`, `row_height_mode="hug"` is supported and auto-sizes each streamed row chunk.
 
 ### Width and Height Units
 
@@ -415,13 +496,13 @@ Styles are defined in the `.xlsx` template itself. The library extracts them dur
 | `bold`      | `True` / `False`                          |                                                |
 | `italic`    | `True` / `False`                          |                                                |
 | `underline` | `"single"`, `"double"`, `None`            | Rendered in PDF via `<u>` markup               |
-| `color`     | Hex ARGB string, e.g. `"FF1F2D3A"`        |                                                |
+| `color`     | Hex ARGB string or `theme:<index>:<tint>` | PDF falls back to the default Office theme palette for theme colors |
 
 ### Fill Properties
 
 | Property    | Values                  | Notes                                       |
 |-------------|-------------------------|---------------------------------------------|
-| `bg_color`  | Hex ARGB string or None | Solid fills only (`fgColor` in openpyxl)    |
+| `bg_color`  | Hex ARGB string, `theme:<index>:<tint>`, or None | Solid fills only (`fgColor` in openpyxl)    |
 
 Patterned fills are not extracted or rendered.
 
@@ -432,6 +513,8 @@ Patterned fills are not extracted or rendered.
 | `horizontal`  | `"left"`, `"center"`, `"right"`, `"centerContinuous"` |
 | `vertical`    | `"top"`, `"center"`, `"bottom"`                     |
 | `wrap_text`   | `True` / `False`                                    |
+
+In PDF output, newline characters render as line breaks only when `wrap_text=True`; otherwise they are flattened to spaces.
 
 ### Border Properties
 
@@ -545,7 +628,7 @@ report_bundle/
 Loading a persisted bundle:
 
 ```python
-bundle = mo_dataport.export("report_bundle/", "output.xlsx")
+mo_dataport.export("report_bundle/", "output.xlsx")
 # or load manually:
 from mindoff_dataport import ReportBundle
 bundle = ReportBundle.load("report_bundle/")
@@ -628,7 +711,7 @@ Repeat section constraints:
 bundle = mo_dataport.compile(
     schema,
     {
-        "region_sheet": {           # template sheet name
+        "region_sheet": {           # sheet-name placeholder key
             "North Sheet": {"region_name": "North", "owner": "Alice", "sales_rows": north_df},
             "South Sheet": {"region_name": "South", "owner": "Bob",   "sales_rows": south_df},
         }
@@ -636,6 +719,55 @@ bundle = mo_dataport.compile(
 )
 mo_dataport.export(bundle, "regions.xlsx", export_mode="streaming")
 ```
+
+---
+
+### Dataframe Column Occupation and Alignment
+
+```python
+rows = pl.scan_parquet("data.parquet").select(
+    ["Employee Name", "Department", "Amount"]
+)
+
+bundle = mo_dataport.compile(
+    schema,
+    {
+        "Column Layout": {
+            "report_title": "Dataframe Column Occupation",
+            "headers": rows,
+            "rows": rows,
+        }
+    },
+    dataframe_options={
+        "Column Layout": {
+            "headers": {
+                "columns": {
+                    "Employee Name": {"occupation": 2, "alignment": "center"},
+                    "Department": {"occupation": 2, "alignment": "center"},
+                    "Amount": {"occupation": 1, "alignment": "center"},
+                }
+            },
+            "rows": {
+                "columns": {
+                    "Employee Name": {"occupation": 2, "alignment": "left"},
+                    "Department": {"occupation": 2, "alignment": "center"},
+                    "Amount": {"occupation": 1, "alignment": "right"},
+                }
+            },
+        }
+    },
+)
+mo_dataport.export(bundle, "column_layout.xlsx", export_mode="streaming")
+mo_dataport.export(
+    bundle,
+    "column_layout.pdf",
+    format="pdf",
+    orientation="portrait",
+    row_height_mode="fixed",
+)
+```
+
+See `examples/dataframe_column_layout/xlsx.py` and `examples/dataframe_column_layout/pdf.py`.
 
 ---
 
@@ -671,7 +803,7 @@ outputs = mo_dataport.export(
     export_mode="streaming",
     max_rows_per_workbook=500_000,  # split when a sheet exceeds this row count
 )
-# outputs → list[str] of part paths, or a .zip path when multiple parts are produced
+# outputs -> list[str] with a single `.zip` path when the export is split
 ```
 
 ---

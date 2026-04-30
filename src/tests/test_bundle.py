@@ -10,7 +10,20 @@ import reportlab
 
 from mindoff_dataport import mo_dataport
 from mindoff_dataport.bundle import load_report_bundle
-from mindoff_dataport.pdf_renderer import _FontResolver, _LazyFlowables, _table_style
+from mindoff_dataport.pdf_renderer import (
+    _FontResolver,
+    _LazyFlowables,
+    _apply_tint,
+    _column_widths,
+    _data_source_map,
+    _dataframe_pdf_rows,
+    _hex_color,
+    _paragraph,
+    _repeat_record_rows,
+    _row_chunk_table,
+    _table_style,
+)
+from mindoff_dataport.xlsx_renderer import _expanded_cells
 
 # §1. Constants & Exceptions
 
@@ -530,6 +543,118 @@ def test_dataframe_header_only_does_not_write_source_file(managed_tmp_dir: Path)
     assert anchors[0]["source"] is None
 
 
+def test_compile_stores_dataframe_column_layouts_and_expands_dimensions():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"], "Amount": [10]})}},
+        dataframe_options={
+            "Sheet1": {
+                "rows": {
+                    "columns": {
+                        "Name": {"occupation": 2, "alignment": "left"},
+                        "Amount": {"occupation": 3, "alignment": "right"},
+                        "Ignored": {"occupation": 9, "alignment": "center"},
+                    }
+                }
+            }
+        },
+    )
+
+    sheet = bundle.report["sheets"][0]
+    anchor = sheet["dataframe_anchors"][0]
+    assert sheet["dimensions"] == "A1:E1"
+    assert anchor["column_layouts"] == [
+        {
+            "name": "Name",
+            "start_col_offset": 0,
+            "occupation": 2,
+            "alignment": "left",
+        },
+        {
+            "name": "Amount",
+            "start_col_offset": 2,
+            "occupation": 3,
+            "alignment": "right",
+        },
+    ]
+
+
+def test_compile_scopes_dataframe_column_layouts_by_placeholder_key():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{headers:dataframe-header}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:A2",
+    )
+    df = polars.DataFrame({"Amount": [10]})
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"headers": df, "rows": df}},
+        dataframe_options={
+            "Sheet1": {
+                "headers": {"columns": {"Amount": {"occupation": 1, "alignment": "center"}}},
+                "rows": {"columns": {"Amount": {"occupation": 3, "alignment": "right"}}},
+            }
+        },
+    )
+
+    header, content = bundle.report["sheets"][0]["dataframe_anchors"]
+    assert header["column_layouts"][0]["occupation"] == 1
+    assert header["column_layouts"][0]["alignment"] == "center"
+    assert content["column_layouts"][0]["occupation"] == 3
+    assert content["column_layouts"][0]["alignment"] == "right"
+
+
+def test_compile_rejects_template_merge_over_dataframe_occupied_range():
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["merged"] = True
+    anchor["merge_anchor"] = "A1"
+    shadow = _cell("B1", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "A1"
+    schema = _schema({"A1": anchor, "B1": shadow}, dims="A1:B1")
+    schema["sheets"][0]["merged_regions"] = ["B1:B1"]
+
+    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
+            dataframe_options={
+                "Sheet1": {
+                    "rows": {"columns": {"Name": {"occupation": 2}}}
+                }
+            },
+        )
+
+
+def test_compile_rejects_invalid_dataframe_column_layout_options():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    df = polars.DataFrame({"Name": ["A"]})
+
+    with pytest.raises(ValueError, match="positive integer"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": df}},
+            dataframe_options={
+                "Sheet1": {"rows": {"columns": {"Name": {"occupation": 0}}}}
+            },
+        )
+    with pytest.raises(ValueError, match="alignment"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": df}},
+            dataframe_options={
+                "Sheet1": {
+                    "rows": {"columns": {"Name": {"alignment": "justify"}}}
+                }
+            },
+        )
+
+
 def test_old_dataframe_headers_spelling_is_not_a_placeholder():
     schema = _schema({"A1": _cell("A1", "{{rows:dataframe-headers}}")}, dims="A1:A1")
 
@@ -688,6 +813,238 @@ def test_pdf_export_renders_parquet_backed_dataframe(managed_tmp_dir: Path):
     assert out.read_bytes().startswith(b"%PDF")
 
 
+def test_pdf_dataframe_rows_emit_occupation_spans_and_alignment():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{headers:dataframe-header}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:A2",
+    )
+    df = polars.DataFrame(
+        {"Employee Name": ["Alice"], "Department": ["Finance"], "Amount": [12]}
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"headers": df, "rows": df}},
+        dataframe_options={
+            "Sheet1": {
+                "headers": {
+                    "columns": {
+                        "Employee Name": {"occupation": 2, "alignment": "center"},
+                        "Amount": {"occupation": 2, "alignment": "center"},
+                    }
+                },
+                "rows": {
+                    "columns": {
+                        "Employee Name": {"occupation": 2, "alignment": "left"},
+                        "Amount": {"occupation": 2, "alignment": "right"},
+                    }
+                },
+            }
+        },
+    )
+    sheet = bundle.report["sheets"][0]
+
+    rows = list(
+        _dataframe_pdf_rows(
+            bundle,
+            _data_source_map(bundle),
+            sheet,
+            batch_size=1,
+        )
+    )
+
+    assert rows[0]["cells"][1]["value"] == "Employee Name"
+    assert rows[0]["cells"][4]["value"] == "Amount"
+    assert rows[1]["cells"][1]["value"] == "Alice"
+    assert rows[1]["cells"][4]["value"] == 12
+    assert rows[1]["cells"][1]["alignment"]["horizontal"] == "left"
+    assert rows[1]["cells"][4]["alignment"]["horizontal"] == "right"
+    assert rows[0]["merges"] == [
+        {"min_row_offset": 0, "max_row_offset": 0, "min_col": 1, "max_col": 2},
+        {"min_row_offset": 0, "max_row_offset": 0, "min_col": 4, "max_col": 5},
+    ]
+    table = _row_chunk_table(sheet, rows, 1, 5, 500, _FontResolver())
+    assert ("SPAN", (0, 0), (1, 0)) in table._spanCmds
+    assert ("SPAN", (3, 1), (4, 1)) in table._spanCmds
+
+
+def test_pdf_table_uses_shared_expanded_xlsx_render_plan_for_dataframe_styles():
+    header = _cell("A1", "{{headers:dataframe-header}}")
+    header["fill"] = {"bg_color": "FF1F4E79"}
+    header["font"] = dict(header["font"])
+    header["font"]["color"] = "FFFFFFFF"
+    header["alignment"] = dict(header["alignment"])
+    header["alignment"]["vertical"] = "center"
+    content = _cell("A2", "{{rows:dataframe-content}}")
+    content["fill"] = {"bg_color": "FFD9EAF7"}
+    content["font"] = dict(content["font"])
+    content["font"]["color"] = "FF203040"
+    content["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thin", "color": "FF000000"},
+        "left": {"style": "thin", "color": "FF000000"},
+        "right": {"style": "thin", "color": "FF000000"},
+    }
+    schema = _schema({"A1": header, "A2": content}, dims="A1:A2")
+    df = polars.DataFrame({"Amount": [12]})
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"headers": df, "rows": df}},
+        dataframe_options={
+            "Sheet1": {
+                "headers": {"columns": {"Amount": {"occupation": 2, "alignment": "center"}}},
+                "rows": {"columns": {"Amount": {"occupation": 2, "alignment": "right"}}},
+            }
+        },
+    )
+
+    sheet, cells = _expanded_cells(
+        bundle, bundle.report["sheets"][0], streaming_chunk_rows=1
+    )
+    commands = _table_style(sheet, cells, 1, 1, 2, 2, _FontResolver()).getCommands()
+
+    assert sheet["merged_regions"] == ["A1:B1", "A2:B2"]
+    assert cells[(1, 1)]["value"] == "Amount"
+    assert cells[(1, 1)]["alignment"]["horizontal"] == "center"
+    assert cells[(2, 1)]["value"] == 12
+    assert cells[(2, 1)]["alignment"]["horizontal"] == "right"
+    assert ("SPAN", (0, 0), (1, 0)) in commands
+    assert ("SPAN", (0, 1), (1, 1)) in commands
+    assert any(item[0] == "BACKGROUND" and item[1] == (0, 1) and item[2] == (1, 1) for item in commands)
+    assert any(item[0] == "TEXTCOLOR" and item[1] == (0, 1) and item[2] == (1, 1) for item in commands)
+    assert ("ALIGN", (0, 1), (1, 1), "RIGHT") in commands
+    assert ("LEFTPADDING", (0, 1), (1, 1), 0) in commands
+
+
+def test_pdf_column_widths_follow_xlsx_widths_with_deterministic_scaling():
+    sheet = _schema(
+        {"A1": _cell("A1", "A"), "B1": _cell("B1", "B")},
+        dims="A1:B1",
+    )["sheets"][0]
+    sheet["column_widths"] = {"A": 20.0, "B": 10.0}
+
+    assert _column_widths(sheet, {}, 1, 1, 2, 1, 1_000) == [140.0, 70.0]
+    assert _column_widths(sheet, {}, 1, 1, 2, 1, 105) == [70.0, 35.0]
+
+
+def test_pdf_export_streams_dataframe_occupation_chunks(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B", "C"]})}},
+        dataframe_options={
+            "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+        },
+    )
+    out = managed_tmp_dir / "occupied.pdf"
+
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
+
+    assert out.exists()
+    assert out.read_bytes().startswith(b"%PDF")
+
+
+def test_pdf_export_rejects_hug_sizing_for_dataframe_content(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1]})}},
+    )
+
+    with pytest.raises(ValueError, match="hug.*dataframe-content"):
+        mo_dataport.export(
+            bundle,
+            str(managed_tmp_dir / "hug.pdf"),
+            format="pdf",
+            column_width_mode="hug",
+        )
+
+
+def test_pdf_export_allows_row_hug_for_dataframe_content(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2]})}},
+    )
+    out = str(managed_tmp_dir / "row_hug.pdf")
+    mo_dataport.export(bundle, out, format="pdf", row_height_mode="hug")
+    assert Path(out).exists()
+
+
+def test_pdf_repeat_dataframe_occupation_spans():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{name:string}}"),
+            "A3": _cell("A3", "{{line_items:dataframe}}"),
+            "A4": _cell("A4", ""),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A5",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {
+                        "name": "Acme",
+                        "line_items": polars.DataFrame({"sku": ["A"], "qty": [1]}),
+                    }
+                ]
+            }
+        },
+        dataframe_options={
+            "Sheet1": {
+                "line_items": {
+                    "columns": {
+                        "sku": {"occupation": 2},
+                        "qty": {"occupation": 2},
+                    }
+                }
+            }
+        },
+    )
+    sheet = bundle.report["sheets"][0]
+    section = sheet["repeat_sections"][0]
+    record = section["records"][0]
+
+    rows = list(
+        _repeat_record_rows(
+            bundle,
+            _data_source_map(bundle),
+            record,
+            block_height=section["block_height"],
+            merges=[],
+            batch_size=1,
+        )
+    )
+
+    table = _row_chunk_table(sheet, rows, 1, 4, 500, _FontResolver())
+    assert ("SPAN", (0, 1), (1, 1)) in table._spanCmds
+    assert ("SPAN", (2, 2), (3, 2)) in table._spanCmds
+
+
+def test_fidelity_inherits_anchor_row_height_for_dataframe_rows(managed_tmp_dir: Path):
+    schema = _schema({"A2": _cell("A2", "{{rows:dataframe-content}}")}, dims="A1:B2")
+    schema["sheets"][0]["row_heights"] = {"2": 24.0}
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2], "B": [3, 4]})}},
+    )
+    out = managed_tmp_dir / "out.xlsx"
+
+    mo_dataport.export(bundle, str(out))
+
+    wb = openpyxl.load_workbook(out)
+    ws = wb["Sheet1"]
+    assert ws.row_dimensions[2].height == pytest.approx(24.0)
+    assert ws.row_dimensions[3].height == pytest.approx(24.0)
+    wb.close()
+
+
 def test_pdf_export_handles_merges_and_basic_styles(managed_tmp_dir: Path):
     title = _cell("A1", "Merged Title")
     title["merged"] = True
@@ -810,6 +1167,50 @@ def test_pdf_export_accepts_custom_fonts(managed_tmp_dir: Path):
 
     assert out.exists()
     assert out.read_bytes().startswith(b"%PDF")
+
+
+def test_pdf_hex_color_resolves_theme_zero_to_white():
+    color = _hex_color("theme:0:0.0")
+    assert color is not None
+    assert round(color.red * 255) == 255
+    assert round(color.green * 255) == 255
+    assert round(color.blue * 255) == 255
+
+
+def test_pdf_hex_color_resolves_theme_one_to_black():
+    color = _hex_color("theme:1:0.0")
+    assert color is not None
+    assert round(color.red * 255) == 0
+    assert round(color.green * 255) == 0
+    assert round(color.blue * 255) == 0
+
+
+def test_pdf_apply_tint_lightens_color():
+    r, g, b = _apply_tint((0, 0, 255), 0.5)
+    assert r == 127
+    assert g == 127
+    assert b == 255
+
+
+def test_pdf_apply_tint_darkens_color():
+    r, g, b = _apply_tint((100, 100, 100), -0.5)
+    assert r == 50
+    assert g == 50
+    assert b == 50
+
+
+def test_pdf_paragraph_respects_wrap_text_false():
+    cell = _cell("A1", "line one\nline two")
+    result = _paragraph(cell, _FontResolver())
+    assert "<br/>" not in result.text
+
+
+def test_pdf_paragraph_respects_wrap_text_true():
+    cell = _cell("A1", "line one\nline two")
+    cell["alignment"] = dict(cell["alignment"])
+    cell["alignment"]["wrap_text"] = True
+    result = _paragraph(cell, _FontResolver())
+    assert "<br/>" in result.text
 
 
 def test_pdf_export_accepts_bundle_path(managed_tmp_dir: Path):
@@ -942,10 +1343,11 @@ def test_failed_export_preserves_bundle_directory(managed_tmp_dir: Path):
         bundle_path=str(bundle_path),
     )
 
-    with pytest.raises(ValueError, match="Fidelity XLSX export does not support"):
+    with pytest.raises(ValueError, match="Unsupported export_mode"):
         mo_dataport.export(
             bundle,
             str(managed_tmp_dir / "out.xlsx"),
+            export_mode="fast",
             auto_delete_bundle=True,
         )
 

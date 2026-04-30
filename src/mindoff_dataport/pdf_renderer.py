@@ -18,14 +18,19 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, TableStyle
 
 from .bundle import ReportBundle
-from .template_contract import _parse_dims
+from .template_contract import _infer_cell_type, _parse_dims
 from .schema import CellSchema, SheetSchema
 from .xlsx_renderer import (
-    _content_cells,
+    _anchor_layouts,
+    _anchor_row_merges,
     _data_source_map,
+    _expanded_cells,
     _expanded_sheet_from_manifest,
     _header_cells,
+    _layout_alignment,
+    _occupied_width,
     _repeat_record_rows,
+    _source_rows,
     _static_row_merges,
     _sheet_with_overrides,
 )
@@ -52,6 +57,21 @@ _BORDER_WIDTHS = {
 
 _DEFAULT_COLUMN_WIDTH = 15.0
 _DEFAULT_ROW_HEIGHT = 15.0
+
+# Default Office theme base colors (openpyxl index order: lt1, dk1, lt2, dk2, accent1-6).
+# Used as a fallback when the workbook theme is not available in the PDF render path.
+_DEFAULT_THEME_COLORS: list[tuple[int, int, int]] = [
+    (255, 255, 255),  # 0  lt1      White
+    (0, 0, 0),        # 1  dk1      Black
+    (238, 236, 225),  # 2  lt2      #EEECE1
+    (31, 73, 125),    # 3  dk2      #1F497D
+    (79, 129, 189),   # 4  accent1  #4F81BD
+    (192, 80, 77),    # 5  accent2  #C0504D
+    (155, 187, 89),   # 6  accent3  #9BBB59
+    (128, 100, 162),  # 7  accent4  #8064A2
+    (75, 172, 198),   # 8  accent5  #4BACC6
+    (247, 150, 70),   # 9  accent6  #F79646
+]
 _EXCEL_WIDTH_TO_POINTS = 7.0
 _MIN_COLUMN_WIDTH = 24.0
 _MAX_COLUMN_WIDTH = 180.0
@@ -145,9 +165,30 @@ def _page_size(name: str, orientation: str) -> tuple[float, float]:
     )
 
 
+def _apply_tint(rgb: tuple[int, int, int], tint: float) -> tuple[int, int, int]:
+    r, g, b = rgb
+    if tint > 0:
+        return (int(r + (255 - r) * tint), int(g + (255 - g) * tint), int(b + (255 - b) * tint))
+    if tint < 0:
+        return (int(r * (1 + tint)), int(g * (1 + tint)), int(b * (1 + tint)))
+    return r, g, b
+
+
 def _hex_color(value: str | None) -> colors.Color | None:
     if not value:
         return None
+    if value.startswith("theme:"):
+        parts = value.split(":")
+        if len(parts) != 3:
+            return None
+        try:
+            idx, tint = int(parts[1]), float(parts[2])
+        except ValueError:
+            return None
+        if idx >= len(_DEFAULT_THEME_COLORS):
+            return None
+        r, g, b = _apply_tint(_DEFAULT_THEME_COLORS[idx], tint)
+        return colors.Color(r / 255, g / 255, b / 255)
     raw = value[-6:]
     if len(raw) != 6:
         return None
@@ -297,7 +338,9 @@ def _paragraph(cell: CellSchema, font_resolver: _FontResolver) -> Paragraph | st
         textColor=color or colors.black,
         alignment=_paragraph_alignment(cell["alignment"].get("horizontal")),
     )
-    return Paragraph(text.replace("\n", "<br/>"), style)
+    wrap = cell["alignment"].get("wrap_text", False)
+    text_body = text.replace("\n", "<br/>") if wrap else text.replace("\n", " ")
+    return Paragraph(text_body, style)
 
 
 def _coord_indexes(coord: str) -> tuple[int, int]:
@@ -310,38 +353,6 @@ def _is_non_anchor_merged_cell(cell: CellSchema) -> bool:
         None,
         cell["coordinate"],
     )
-
-
-def _expanded_cells(
-    bundle: ReportBundle,
-    sheet: SheetSchema,
-    *,
-    streaming_chunk_rows: int,
-) -> tuple[SheetSchema, dict[tuple[int, int], CellSchema]]:
-    source_map = _data_source_map(bundle)
-    sheet = _expanded_sheet_from_manifest(sheet, source_map)
-    cells: dict[tuple[int, int], CellSchema] = {}
-
-    for cell in sheet["cells"].values():
-        if _is_non_anchor_merged_cell(cell):
-            continue
-        cells[_coord_indexes(cell["coordinate"])] = cell
-
-    for anchor in sheet.get("dataframe_anchors", []):
-        anchor_cells = (
-            _header_cells(anchor)
-            if anchor["placeholder_type"] == "dataframe-header"
-            else _content_cells(
-                bundle,
-                source_map,
-                anchor,
-                batch_size=streaming_chunk_rows,
-            )
-        )
-        for coord, cell in anchor_cells:
-            cells[_coord_indexes(coord)] = cell
-
-    return sheet, cells
 
 
 def _hug_column_width(
@@ -460,10 +471,10 @@ def _style_cell(
     commands.append(
         ("VALIGN", point, point, _vertical_alignment(alignment.get("vertical")))
     )
-    commands.append(("LEFTPADDING", point, point, 4))
-    commands.append(("RIGHTPADDING", point, point, 4))
-    commands.append(("TOPPADDING", point, point, 3))
-    commands.append(("BOTTOMPADDING", point, point, 3))
+    commands.append(("LEFTPADDING", point, point, 0))
+    commands.append(("RIGHTPADDING", point, point, 0))
+    commands.append(("TOPPADDING", point, point, 0))
+    commands.append(("BOTTOMPADDING", point, point, 0))
 
     _border(commands, point, "LINEABOVE", cell["borders"]["top"])
     _border(commands, point, "LINEBELOW", cell["borders"]["bottom"])
@@ -593,10 +604,10 @@ def _merged_style_commands(
             commands.append(("BACKGROUND", start, end, fill_color))
         commands.append(("ALIGN", start, end, _alignment(alignment.get("horizontal"))))
         commands.append(("VALIGN", start, end, _vertical_alignment(alignment.get("vertical"))))
-        commands.append(("LEFTPADDING", start, end, 4))
-        commands.append(("RIGHTPADDING", start, end, 4))
-        commands.append(("TOPPADDING", start, end, 3))
-        commands.append(("BOTTOMPADDING", start, end, 3))
+        commands.append(("LEFTPADDING", start, end, 0))
+        commands.append(("RIGHTPADDING", start, end, 0))
+        commands.append(("TOPPADDING", start, end, 0))
+        commands.append(("BOTTOMPADDING", start, end, 0))
     return commands
 
 
@@ -680,6 +691,185 @@ def _sheet_table(
         _table_style(sheet, cells, min_col, min_row, max_col, max_row, font_resolver)
     )
     return table
+
+
+def _has_dataframe_content(sheet: SheetSchema) -> bool:
+    return any(
+        anchor["placeholder_type"] == "dataframe-content"
+        for anchor in sheet.get("dataframe_anchors", [])
+    )
+
+
+def _validate_pdf_dataframe_sizing(
+    sheet: SheetSchema,
+    *,
+    column_width_mode: str | None,
+) -> None:
+    if not _has_dataframe_content(sheet):
+        return
+    col_mode = column_width_mode or sheet.get("column_width_mode", "fixed")
+    if col_mode == "hug":
+        raise ValueError(
+            "PDF export does not support column_width_mode='hug' for dataframe-content sheets. "
+            "Use 'fixed' or 'even' — column hug requires buffering all rows before sizing."
+        )
+
+
+def _dataframe_pdf_rows(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    sheet: SheetSchema,
+    *,
+    batch_size: int,
+) -> Iterator[dict[str, Any]]:
+    sheet = _expanded_sheet_from_manifest(sheet, source_map)
+    _, min_row, _, max_row = _parse_dims(sheet["dimensions"])
+
+    static_by_row: dict[int, dict[int, CellSchema]] = {}
+    merge_by_row: dict[int, list[dict[str, Any]]] = {}
+    for cell in sheet["cells"].values():
+        if _is_non_anchor_merged_cell(cell):
+            continue
+        row_idx, col_idx = _coord_indexes(cell["coordinate"])
+        static_by_row.setdefault(row_idx, {})[col_idx] = cell
+    for row_idx in range(min_row, max_row + 1):
+        merge_by_row[row_idx] = _static_row_merges(sheet, row_idx)
+
+    content_states: list[dict[str, Any]] = []
+    for anchor in sheet.get("dataframe_anchors", []):
+        if anchor["placeholder_type"] == "dataframe-header":
+            row_cells = static_by_row.setdefault(anchor["start_row"], {})
+            for _, cell in _header_cells(anchor):
+                _, col_idx = _coord_indexes(cell["coordinate"])
+                row_cells[col_idx] = cell
+            merge_by_row.setdefault(anchor["start_row"], []).extend(
+                _anchor_row_merges(anchor, anchor["start_row"])
+            )
+            continue
+
+        source = source_map[anchor["source"]]
+        content_states.append(
+            {
+                "anchor": anchor,
+                "rows": _source_rows(bundle, source, batch_size=batch_size),
+                "remaining": int(source.get("rows", 0)),
+            }
+        )
+
+    for row_idx in range(min_row, max_row + 1):
+        row_cells = dict(static_by_row.get(row_idx, {}))
+        row_merges = list(merge_by_row.get(row_idx, []))
+        for state in content_states:
+            anchor = state["anchor"]
+            if row_idx < anchor["start_row"] or state["remaining"] <= 0:
+                continue
+            try:
+                row_values = next(state["rows"])
+            except StopIteration:
+                state["remaining"] = 0
+                continue
+            state["remaining"] -= 1
+            for layout, value in zip(_anchor_layouts(anchor), row_values):
+                col_idx = anchor["start_col"] + layout["start_col_offset"]
+                content_cell = dict(anchor["cell"])
+                content_cell["value"] = value
+                content_cell["cell_type"] = _infer_cell_type(value)
+                content_cell["alignment"] = _layout_alignment(anchor["cell"], layout)
+                row_cells[col_idx] = content_cell  # type: ignore[assignment]
+            row_merges.extend(_anchor_row_merges(anchor, row_idx))
+        yield {"cells": row_cells, "merges": row_merges}
+
+
+def _chunked_row_tables(
+    sheet: SheetSchema,
+    row_items: Iterator[dict[str, Any]],
+    min_col: int,
+    max_col: int,
+    available_width: float,
+    font_resolver: _FontResolver,
+    *,
+    streaming_chunk_rows: int,
+    chunk_row_height: float | None = None,
+) -> Iterator[Table]:
+    chunk: list[dict[str, Any]] = []
+    for row_item in row_items:
+        if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+                chunk_row_height=chunk_row_height,
+            )
+            chunk = []
+        chunk.append(row_item)
+        if len(chunk) >= streaming_chunk_rows:
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+                chunk_row_height=chunk_row_height,
+            )
+            chunk = []
+    if chunk:
+        yield _row_chunk_table(
+            sheet,
+            chunk,
+            min_col,
+            max_col,
+            available_width,
+            font_resolver,
+            chunk_row_height=chunk_row_height,
+        )
+
+
+def _dataframe_sheet_flowables(
+    bundle: ReportBundle,
+    raw_sheet: dict[str, Any],
+    *,
+    available_width: float,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    streaming_chunk_rows: int,
+    font_resolver: _FontResolver,
+) -> Iterator[Table]:
+    sheet = _sheet_with_overrides(
+        raw_sheet,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+    )
+    _validate_pdf_dataframe_sizing(
+        sheet,
+        column_width_mode=column_width_mode,
+    )
+    source_map = _data_source_map(bundle)
+    sheet = _expanded_sheet_from_manifest(sheet, source_map)
+    min_col, _, max_col, _ = _parse_dims(sheet["dimensions"])
+    chunk_row_height = _content_anchor_row_height(sheet)
+    yield from _chunked_row_tables(
+        sheet,
+        _dataframe_pdf_rows(
+            bundle,
+            source_map,
+            sheet,
+            batch_size=streaming_chunk_rows,
+        ),
+        min_col,
+        max_col,
+        available_width,
+        font_resolver,
+        streaming_chunk_rows=streaming_chunk_rows,
+        chunk_row_height=chunk_row_height,
+    )
 
 
 def _repeat_sheet_flowables(
@@ -822,6 +1012,19 @@ def _sheet_flowables(
             font_resolver=font_resolver,
         )
         return
+    if _has_dataframe_content(raw_sheet):
+        yield from _dataframe_sheet_flowables(
+            bundle,
+            raw_sheet,
+            available_width=available_width,
+            column_width_mode=column_width_mode,
+            row_height_mode=row_height_mode,
+            default_column_width=default_column_width,
+            default_row_height=default_row_height,
+            streaming_chunk_rows=streaming_chunk_rows,
+            font_resolver=font_resolver,
+        )
+        return
     yield _sheet_table(
         bundle,
         raw_sheet,
@@ -844,7 +1047,7 @@ def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
             for anchor in record["dataframe_anchors"]:
                 max_col = max(
                     max_col,
-                    anchor["start_col"] + max(len(anchor["columns"]) - 1, 0),
+                    anchor["start_col"] + max(_occupied_width(anchor) - 1, 0),
                 )
     return max_col
 
@@ -877,6 +1080,8 @@ def _row_chunk_table(
     max_col: int,
     available_width: float,
     font_resolver: _FontResolver,
+    *,
+    chunk_row_height: float | None = None,
 ) -> Table:
     cells: dict[tuple[int, int], CellSchema] = {}
     merged_regions: list[str] = []
@@ -907,12 +1112,28 @@ def _row_chunk_table(
             len(rows),
             available_width,
         ),
-        rowHeights=None,
+        rowHeights=[chunk_row_height] * len(rows) if chunk_row_height is not None else None,
         repeatRows=0,
         splitByRow=1,
     )
     table.setStyle(_table_style(chunk_sheet, cells, min_col, 1, max_col, len(rows), font_resolver))
     return table
+
+
+def _content_anchor_row_height(sheet: SheetSchema) -> float | None:
+    """Return the fixed row height for dataframe-content rows, or None to auto-size."""
+    mode = sheet.get("row_height_mode", "fixed")
+    if mode == "hug":
+        return None
+    anchor = next(
+        (a for a in sheet.get("dataframe_anchors", []) if a["placeholder_type"] == "dataframe-content"),
+        None,
+    )
+    if anchor is None:
+        return None
+    if mode == "even":
+        return float(sheet.get("default_row_height", _DEFAULT_ROW_HEIGHT))
+    return float(sheet["row_heights"].get(str(anchor["start_row"])) or _DEFAULT_ROW_HEIGHT)
 
 
 def _ensure_output_parent(output_path: str) -> None:

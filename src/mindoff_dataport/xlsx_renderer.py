@@ -87,13 +87,14 @@ def _header_cells(anchor: dict[str, Any]) -> Iterable[tuple[str, CellSchema]]:
     start_col = anchor["start_col"]
     bold_font = dict(cell["font"])
     bold_font["bold"] = True
-    for offset, header in enumerate(anchor["columns"]):
-        coord = f"{get_column_letter(start_col + offset)}{start_row}"
+    for layout in _anchor_layouts(anchor):
+        coord = f"{get_column_letter(start_col + layout['start_col_offset'])}{start_row}"
         header_cell = dict(cell)
         header_cell["coordinate"] = coord
-        header_cell["value"] = str(header)
+        header_cell["value"] = str(layout["name"])
         header_cell["cell_type"] = "string"
         header_cell["font"] = bold_font
+        header_cell["alignment"] = _layout_alignment(cell, layout)
         yield coord, header_cell  # type: ignore[misc]
 
 
@@ -102,12 +103,13 @@ def _header_cells_at(anchor: dict[str, Any], row_idx: int) -> Iterable[CellSchem
     start_col = anchor["start_col"]
     bold_font = dict(cell["font"])
     bold_font["bold"] = True
-    for offset, header in enumerate(anchor["columns"]):
+    for layout in _anchor_layouts(anchor):
         header_cell = dict(cell)
-        header_cell["coordinate"] = f"{get_column_letter(start_col + offset)}{row_idx}"
-        header_cell["value"] = str(header)
+        header_cell["coordinate"] = f"{get_column_letter(start_col + layout['start_col_offset'])}{row_idx}"
+        header_cell["value"] = str(layout["name"])
         header_cell["cell_type"] = "string"
         header_cell["font"] = bold_font
+        header_cell["alignment"] = _layout_alignment(cell, layout)
         yield header_cell  # type: ignore[misc]
 
 
@@ -122,14 +124,86 @@ def _content_cells(
     start_row = anchor["start_row"]
     start_col = anchor["start_col"]
     source = source_map[anchor["source"]]
+    layouts = _anchor_layouts(anchor)
     for row_offset, row in enumerate(_source_rows(bundle, source, batch_size=batch_size)):
-        for col_offset, value in enumerate(row):
-            coord = f"{get_column_letter(start_col + col_offset)}{start_row + row_offset}"
+        for layout, value in zip(layouts, row):
+            coord = f"{get_column_letter(start_col + layout['start_col_offset'])}{start_row + row_offset}"
             content_cell = dict(cell)
             content_cell["coordinate"] = coord
             content_cell["value"] = value
             content_cell["cell_type"] = _infer_cell_type(value)
+            content_cell["alignment"] = _layout_alignment(cell, layout)
             yield coord, content_cell  # type: ignore[misc]
+
+
+def _anchor_layouts(anchor: dict[str, Any]) -> list[dict[str, Any]]:
+    layouts = anchor.get("column_layouts")
+    if layouts:
+        return layouts
+    return [
+        {"name": name, "start_col_offset": offset, "occupation": 1}
+        for offset, name in enumerate(anchor["columns"])
+    ]
+
+
+def _layout_alignment(cell: CellSchema, layout: dict[str, Any]) -> dict[str, Any]:
+    alignment = dict(cell["alignment"])
+    if layout.get("alignment") is not None:
+        alignment["horizontal"] = layout["alignment"]
+    return alignment
+
+
+def _occupied_width(anchor: dict[str, Any]) -> int:
+    layouts = _anchor_layouts(anchor)
+    if not layouts:
+        return 0
+    last = layouts[-1]
+    return int(last["start_col_offset"]) + int(last["occupation"])
+
+
+def _layout_merge_range(
+    anchor: dict[str, Any], layout: dict[str, Any], row_idx: int
+) -> CellRange | None:
+    occupation = int(layout["occupation"])
+    if occupation <= 1:
+        return None
+    start_col = int(anchor["start_col"]) + int(layout["start_col_offset"])
+    return CellRange(
+        min_col=start_col,
+        min_row=row_idx,
+        max_col=start_col + occupation - 1,
+        max_row=row_idx,
+    )
+
+
+def _anchor_row_merges(anchor: dict[str, Any], row_idx: int) -> list[dict[str, Any]]:
+    merges: list[dict[str, Any]] = []
+    for layout in _anchor_layouts(anchor):
+        merge_range = _layout_merge_range(anchor, layout, row_idx)
+        if merge_range is None:
+            continue
+        merges.append(
+            {
+                "min_row_offset": 0,
+                "max_row_offset": 0,
+                "min_col": merge_range.min_col,
+                "max_col": merge_range.max_col,
+            }
+        )
+    return merges
+
+
+def _generated_cell_merges(
+    anchor: dict[str, Any], row_idx: int, col_idx: int
+) -> list[CellRange]:
+    result: list[CellRange] = []
+    for layout in _anchor_layouts(anchor):
+        if int(anchor["start_col"]) + int(layout["start_col_offset"]) != col_idx:
+            continue
+        merge_range = _layout_merge_range(anchor, layout, row_idx)
+        if merge_range is not None:
+            result.append(merge_range)
+    return result
 
 
 def _render_fidelity(
@@ -145,10 +219,6 @@ def _render_fidelity(
         raise ValueError(
             "Fidelity XLSX export does not support repeat sections. Use export_mode='streaming'."
         )
-    if bundle.manifest.get("dataframe_sources"):
-        raise ValueError(
-            "Fidelity XLSX export does not support file-backed dataframe sources. Use export_mode='streaming'."
-        )
 
     source_map = _data_source_map(bundle)
     wb = openpyxl.Workbook()
@@ -162,29 +232,16 @@ def _render_fidelity(
             default_column_width=default_column_width,
             default_row_height=default_row_height,
         )
-        sheet = _expanded_sheet_from_manifest(sheet, source_map)
+        sheet, cells = _expanded_cells(bundle, sheet, streaming_chunk_rows=50_000)
         ws = wb.create_sheet(title=sheet["name"])
         _apply_sheet_view(ws, sheet)
         _apply_dimensions(ws, sheet)
-        for cell_schema in sheet["cells"].values():
+        for cell_schema in cells.values():
             cell = ws[cell_schema["coordinate"]]
             _apply_cell_value(cell, cell_schema)
             _apply_cell_styles(cell, cell_schema)
 
-        max_row = _parse_dims(sheet["dimensions"])[3]
-        max_col = _parse_dims(sheet["dimensions"])[2]
-        for anchor in sheet.get("dataframe_anchors", []):
-            anchor_cells = (
-                _header_cells(anchor)
-                if anchor["placeholder_type"] == "dataframe-header"
-                else _content_cells(bundle, source_map, anchor, batch_size=50_000)
-            )
-            for coord, cell_schema in anchor_cells:
-                cell = ws[coord]
-                _apply_cell_value(cell, cell_schema)
-                _apply_cell_styles(cell, cell_schema)
-                max_row = max(max_row, cell.row)
-                max_col = max(max_col, cell.column)
+        _, _, max_col, max_row = _parse_dims(sheet["dimensions"])
 
         for region in sheet["merged_regions"]:
             ws.merge_cells(region)
@@ -192,6 +249,8 @@ def _render_fidelity(
 
         if sheet.get("column_width_mode", "fixed") == "hug":
             _apply_hug_columns(ws, _dimensioned_sheet(sheet, max_col, max_row))
+        if sheet.get("row_height_mode", "fixed") == "fixed":
+            _apply_fixed_dataframe_row_heights_fidelity(ws, sheet, source_map)
         if sheet.get("row_height_mode", "fixed") == "hug":
             _apply_hug_rows(ws, _dimensioned_sheet(sheet, max_col, max_row))
 
@@ -214,13 +273,52 @@ def _expanded_sheet_from_manifest(
 ) -> SheetSchema:
     _, _, max_col, max_row = _parse_dims(sheet["dimensions"])
     for anchor in sheet.get("dataframe_anchors", []):
-        max_col = max(max_col, anchor["start_col"] + max(len(anchor["columns"]) - 1, 0))
+        max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
         if anchor["placeholder_type"] == "dataframe-content":
             source = source_map[anchor["source"]]
             max_row = max(max_row, anchor["start_row"] + max(source.get("rows", 0) - 1, 0))
         else:
             max_row = max(max_row, anchor["start_row"])
     return _dimensioned_sheet(sheet, max_col, max_row)
+
+
+def _expanded_cells(
+    bundle: ReportBundle,
+    sheet: SheetSchema,
+    *,
+    streaming_chunk_rows: int,
+) -> tuple[SheetSchema, dict[tuple[int, int], CellSchema]]:
+    source_map = _data_source_map(bundle)
+    sheet = _expanded_sheet_from_manifest(sheet, source_map)
+    cells: dict[tuple[int, int], CellSchema] = {}
+    generated_regions: list[str] = []
+
+    for cell in sheet["cells"].values():
+        if _is_non_anchor_merged_cell(cell):
+            continue
+        cells[_coord_indexes(cell["coordinate"])] = cell
+
+    for anchor in sheet.get("dataframe_anchors", []):
+        anchor_cells = (
+            _header_cells(anchor)
+            if anchor["placeholder_type"] == "dataframe-header"
+            else _content_cells(
+                bundle,
+                source_map,
+                anchor,
+                batch_size=streaming_chunk_rows,
+            )
+        )
+        for coord, cell in anchor_cells:
+            row_idx, col_idx = _coord_indexes(coord)
+            cells[(row_idx, col_idx)] = cell
+            for merge_range in _generated_cell_merges(anchor, row_idx, col_idx):
+                generated_regions.append(str(merge_range))
+
+    if generated_regions:
+        sheet = dict(sheet)
+        sheet["merged_regions"] = [*sheet.get("merged_regions", []), *generated_regions]
+    return sheet, cells
 
 
 def _sheet_with_overrides(
@@ -296,7 +394,7 @@ def _dataframe_content_range(
     anchor: dict[str, Any], source: dict[str, Any]
 ) -> CellRange | None:
     row_count = int(source.get("rows", 0))
-    col_count = len(anchor["columns"])
+    col_count = _occupied_width(anchor)
     if row_count <= 0 or col_count <= 0:
         return None
     return CellRange(
@@ -305,6 +403,41 @@ def _dataframe_content_range(
         max_col=anchor["start_col"] + col_count - 1,
         max_row=anchor["start_row"] + row_count - 1,
     )
+
+
+def _anchor_row_height(schema: SheetSchema, anchor: dict[str, Any]) -> float | None:
+    height = schema.get("row_heights", {}).get(str(anchor["start_row"]))
+    if height is None:
+        return None
+    return float(height)
+
+
+def _apply_fixed_dataframe_row_heights_fidelity(
+    ws, schema: SheetSchema, source_map: dict[str, dict[str, Any]]
+) -> None:
+    for anchor in schema.get("dataframe_anchors", []):
+        if anchor["placeholder_type"] != "dataframe-content":
+            continue
+        anchor_height = _anchor_row_height(schema, anchor)
+        if anchor_height is None:
+            continue
+        source = source_map[anchor["source"]]
+        row_count = int(source.get("rows", 0))
+        for row_idx in range(anchor["start_row"], anchor["start_row"] + row_count):
+            if str(row_idx) in schema.get("row_heights", {}):
+                continue
+            ws.row_dimensions[row_idx].height = anchor_height
+
+
+def _apply_fixed_dataframe_row_height_streaming(
+    ws, schema: SheetSchema, anchor: dict[str, Any], row_idx: int
+) -> None:
+    if str(row_idx) in schema.get("row_heights", {}):
+        return
+    anchor_height = _anchor_row_height(schema, anchor)
+    if anchor_height is None:
+        return
+    ws.row_dimensions[row_idx].height = anchor_height
 
 
 def _ranges_overlap(left: CellRange, right: CellRange) -> bool:
@@ -388,6 +521,7 @@ def _streaming_plan(
     streaming_chunk_rows: int,
 ) -> dict[str, Any]:
     static: dict[tuple[int, int], CellSchema] = {}
+    generated_merges: dict[int, list[CellRange]] = {}
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
     content = None
     repeat_rows = None
@@ -407,6 +541,11 @@ def _streaming_plan(
                     "".join(ch for ch in coord if ch.isalpha())
                 )
                 static[(row_idx, col_idx)] = cell
+            for layout in _anchor_layouts(anchor):
+                merge_range = _layout_merge_range(anchor, layout, anchor["start_row"])
+                if merge_range is not None:
+                    generated_merges.setdefault(anchor["start_row"], []).append(merge_range)
+            max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
             continue
 
         source = source_map[anchor["source"]]
@@ -419,7 +558,7 @@ def _streaming_plan(
             ),
             "exhausted": False,
         }
-        max_col = max(max_col, anchor["start_col"] + max(len(anchor["columns"]) - 1, 0))
+        max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
 
     if sheet.get("repeat_sections"):
         repeat_rows = _repeat_row_stream(
@@ -434,6 +573,7 @@ def _streaming_plan(
     return {
         "sheet": sheet,
         "static": static,
+        "generated_merges": generated_merges,
         "content": content,
         "repeat_rows": repeat_rows,
         "min_col": min_col,
@@ -452,7 +592,7 @@ def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
             for anchor in record["dataframe_anchors"]:
                 max_col = max(
                     max_col,
-                    anchor["start_col"] + max(len(anchor["columns"]) - 1, 0),
+                    anchor["start_col"] + max(_occupied_width(anchor) - 1, 0),
                 )
     return max_col
 
@@ -544,16 +684,19 @@ def _repeat_record_rows(
 
     for offset in range(block_height):
         row_cells = dict(cells_by_offset.get(offset, {}))
+        header_merges: list[dict[str, Any]] = []
         for anchor in headers_by_offset.get(offset, []):
             for cell in _header_cells_at(anchor, offset + 1):
                 _, col_idx = _coord_indexes(cell["coordinate"])
                 row_cells[col_idx] = cell
+            header_merges.extend(_anchor_row_merges(anchor, offset + 1))
 
         content_anchors = content_by_offset.get(offset, [])
         if not content_anchors:
             yield {
                 "cells": row_cells,
-                "merges": _repeat_merges_starting_at(merges or [], offset),
+                "merges": _repeat_merges_starting_at(merges or [], offset)
+                + header_merges,
             }
             continue
         yield from _repeat_content_rows(
@@ -561,6 +704,7 @@ def _repeat_record_rows(
             source_map,
             row_cells,
             content_anchors,
+            base_merges=header_merges,
             batch_size=batch_size,
         )
 
@@ -620,6 +764,7 @@ def _repeat_content_rows(
     base_cells: dict[int, CellSchema],
     anchors: list[dict[str, Any]],
     *,
+    base_merges: list[dict[str, Any]] | None = None,
     batch_size: int,
 ) -> Iterator[dict[str, Any]]:
     if len(anchors) > 1:
@@ -628,19 +773,21 @@ def _repeat_content_rows(
         )
     anchor = anchors[0]
     source = source_map[anchor["source"]]
+    layouts = _anchor_layouts(anchor)
     wrote = False
     for row_values in _source_rows(bundle, source, batch_size=batch_size):
         row_cells = dict(base_cells) if not wrote else {}
-        for offset, value in enumerate(row_values):
-            col_idx = anchor["start_col"] + offset
+        for layout, value in zip(layouts, row_values):
+            col_idx = anchor["start_col"] + layout["start_col_offset"]
             content_cell = dict(anchor["cell"])
             content_cell["value"] = value
             content_cell["cell_type"] = _infer_cell_type(value)
+            content_cell["alignment"] = _layout_alignment(anchor["cell"], layout)
             row_cells[col_idx] = content_cell  # type: ignore[assignment]
         wrote = True
-        yield {"cells": row_cells, "merges": []}
+        yield {"cells": row_cells, "merges": (base_merges or []) + _anchor_row_merges(anchor, 1)}
     if not wrote:
-        yield {"cells": base_cells, "merges": []}
+        yield {"cells": base_cells, "merges": base_merges or []}
 
 
 def _is_non_anchor_merged_cell(cell: CellSchema) -> bool:
@@ -658,7 +805,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
     anchor = content["anchor"] if content is not None else None
     max_col = plan["max_col"]
     if anchor is not None:
-        max_col = max(max_col, anchor["start_col"] + max(len(anchor["columns"]) - 1, 0))
+        max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
     col_count = max_col - plan["min_col"] + 1
     wrote_content = False
 
@@ -670,9 +817,11 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
             static = plan["static"].get((row_idx, col_idx))
             if static is not None:
                 row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, static)
+        for merge_range in plan.get("generated_merges", {}).get(row_idx, []):
+            ws.merged_cells.add(merge_range)
         if anchor is not None and row_idx >= anchor["start_row"]:
             wrote_content = _fill_streaming_row(
-                ws, row_cells, plan, anchor, content
+                ws, row_cells, plan, anchor, content, row_idx
             ) or wrote_content
         ws.append(row_cells)
 
@@ -681,7 +830,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
         while row_idx <= max_rows_per_workbook and not content["exhausted"]:
             row_cells = [None] * col_count
             wrote_content = _fill_streaming_row(
-                ws, row_cells, plan, anchor, content
+                ws, row_cells, plan, anchor, content, row_idx
             ) or wrote_content
             if content["exhausted"]:
                 break
@@ -727,7 +876,12 @@ def _write_repeat_streaming_sheet(
 
 
 def _fill_streaming_row(
-    ws, row_cells: list[Any], plan: dict[str, Any], anchor: dict[str, Any], content: dict[str, Any]
+    ws,
+    row_cells: list[Any],
+    plan: dict[str, Any],
+    anchor: dict[str, Any],
+    content: dict[str, Any],
+    row_idx: int,
 ) -> bool:
     try:
         row_values = next(content["rows"])
@@ -735,15 +889,26 @@ def _fill_streaming_row(
         content["exhausted"] = True
         return False
 
-    style_cell = anchor["cell"]
-    for offset, value in enumerate(row_values):
-        col_idx = anchor["start_col"] + offset
+    layouts = _anchor_layouts(anchor)
+    if plan["sheet"].get("row_height_mode", "fixed") == "fixed":
+        _apply_fixed_dataframe_row_height_streaming(ws, plan["sheet"], anchor, row_idx)
+    for layout, value in zip(layouts, row_values):
+        col_idx = anchor["start_col"] + layout["start_col_offset"]
         if col_idx < plan["min_col"] or col_idx > plan["max_col"]:
             continue
         row_cells[col_idx - plan["min_col"]] = _styled_write_only_cell(
-            ws, style_cell, value
+            ws, _cell_with_layout(anchor["cell"], layout), value
         )
+        merge_range = _layout_merge_range(anchor, layout, row_idx)
+        if merge_range is not None:
+            ws.merged_cells.add(merge_range)
     return True
+
+
+def _cell_with_layout(schema: CellSchema, layout: dict[str, Any]) -> CellSchema:
+    result = dict(schema)
+    result["alignment"] = _layout_alignment(schema, layout)
+    return result  # type: ignore[return-value]
 
 
 def _styled_write_only_cell(ws, schema: CellSchema, value: Any) -> WriteOnlyCell:

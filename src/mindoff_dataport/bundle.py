@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.utils.cell import (
     column_index_from_string,
     coordinate_from_string,
@@ -38,6 +39,7 @@ __all__ = [
 # §1. Constants & Exceptions
 
 BUNDLE_VERSION = "1.0"
+_ALIGNMENTS = frozenset({"left", "center", "right"})
 
 # §2. Classes and Sub Classes
 
@@ -185,6 +187,7 @@ def _compile_sheet(
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
+    dataframe_options: dict[str, Any],
 ) -> dict[str, Any]:
     repeats = _repeat_sections(sheet)
     if repeats:
@@ -197,6 +200,7 @@ def _compile_sheet(
             data_sources=data_sources,
             used_ids=used_ids,
             source_cache=source_cache,
+            dataframe_options=dataframe_options,
         )
 
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
@@ -218,9 +222,12 @@ def _compile_sheet(
             key = full_match.group(1)
             anchor_type = full_match.group(2)
             columns = _to_headers(sheet_data[key])
+            column_layouts = _column_layouts(
+                columns, dataframe_options.get(output_name, {}).get(key)
+            )
             col_letter, row_idx = coordinate_from_string(coord)
             col_idx = column_index_from_string(col_letter)
-            max_col = max(max_col, col_idx + max(len(columns) - 1, 0))
+            max_col = max(max_col, col_idx + max(_occupied_width(column_layouts) - 1, 0))
 
             if anchor_type == "dataframe-header":
                 anchor_id = _unique_id(used_ids, f"{output_name}__{key}__{anchor_type}")
@@ -233,6 +240,7 @@ def _compile_sheet(
                         row_idx=row_idx,
                         col_idx=col_idx,
                         columns=columns,
+                        column_layouts=column_layouts,
                         source_record=None,
                         cell=cell,
                     )
@@ -264,6 +272,7 @@ def _compile_sheet(
                         row_idx=row_idx,
                         col_idx=col_idx,
                         columns=columns,
+                        column_layouts=column_layouts,
                         source_record=None,
                         cell=cell,
                     )
@@ -278,6 +287,7 @@ def _compile_sheet(
                     row_idx=row_idx,
                     col_idx=col_idx,
                     columns=columns,
+                    column_layouts=column_layouts,
                     source_record=source_record,
                     cell=cell,
                 )
@@ -297,6 +307,7 @@ def _compile_sheet(
     result["dimensions"] = dimensions
     result["cells"] = static_cells
     result["dataframe_anchors"] = anchors
+    _validate_template_merges_do_not_overlap_dataframes(result)
     return result
 
 
@@ -310,6 +321,7 @@ def _compile_repeat_sheet(
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
+    dataframe_options: dict[str, Any],
 ) -> dict[str, Any]:
     for repeat in repeats:
         _validate_repeat_layout(sheet, repeat)
@@ -332,6 +344,7 @@ def _compile_repeat_sheet(
             data_sources=data_sources,
             used_ids=used_ids,
             source_cache=source_cache,
+            sheet_dataframe_options=dataframe_options.get(output_name, {}),
         )
         static_cells.update(compiled["cells"])
 
@@ -342,10 +355,11 @@ def _compile_repeat_sheet(
             output_name=output_name,
             sheet_data=sheet_data,
             bundle_dir=bundle_dir,
-            data_sources=data_sources,
-            used_ids=used_ids,
-            source_cache=source_cache,
-        )
+                data_sources=data_sources,
+                used_ids=used_ids,
+                source_cache=source_cache,
+                dataframe_options=dataframe_options,
+            )
         repeat_sections.append(section)
         max_col = max(max_col, section_max_col)
 
@@ -371,6 +385,7 @@ def _compile_repeat_section(
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
+    dataframe_options: dict[str, Any],
 ) -> tuple[dict[str, Any], int]:
     repeat_key = repeat["key"]
     records = sheet_data[repeat_key]
@@ -397,6 +412,7 @@ def _compile_repeat_section(
                 data_sources=data_sources,
                 used_ids=used_ids,
                 source_cache=source_cache,
+                sheet_dataframe_options=dataframe_options.get(output_name, {}),
             )
             row_offset = row_idx - block_start
             for item in compiled["cells"].values():
@@ -413,7 +429,7 @@ def _compile_repeat_section(
                 record_anchors.append(anchor)
                 max_col = max(
                     max_col,
-                    anchor["start_col"] + max(len(anchor["columns"]) - 1, 0),
+                    anchor["start_col"] + max(_occupied_width(anchor["column_layouts"]) - 1, 0),
                 )
         compiled_records.append(
             {
@@ -422,8 +438,7 @@ def _compile_repeat_section(
                 "dataframe_anchors": record_anchors,
             }
         )
-    return (
-        {
+    section = {
             "key": repeat_key,
             "start_row": repeat["start_row"],
             "end_row": repeat["end_row"],
@@ -432,9 +447,9 @@ def _compile_repeat_section(
             "block_height": block_height,
             "merged_regions": repeat_merges,
             "records": compiled_records,
-        },
-        max_col,
-    )
+        }
+    _validate_repeat_merges_do_not_overlap_dataframes(section)
+    return section, max_col
 
 
 def _validate_repeat_layout(sheet: SheetSchema, repeat: dict[str, Any]) -> None:
@@ -541,6 +556,7 @@ def _compile_cell(
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
+    sheet_dataframe_options: dict[str, Any],
 ) -> dict[str, Any]:
     value = cell.get("value")
     if not isinstance(value, str):
@@ -569,6 +585,7 @@ def _compile_cell(
                 data_sources=data_sources,
                 used_ids=used_ids,
                 source_cache=source_cache,
+                sheet_dataframe_options=sheet_dataframe_options,
             ),
         }
 
@@ -593,8 +610,10 @@ def _compile_dataframe_anchors(
     data_sources: list[dict[str, Any]],
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
+    sheet_dataframe_options: dict[str, Any],
 ) -> list[dict[str, Any]]:
     columns = _to_headers(value)
+    column_layouts = _column_layouts(columns, sheet_dataframe_options.get(key))
     if anchor_type == "dataframe-header":
         anchor_id = _unique_id(used_ids, f"{output_name}__{key}__{anchor_type}")
         return [
@@ -606,6 +625,7 @@ def _compile_dataframe_anchors(
                 row_idx=row_idx,
                 col_idx=col_idx,
                 columns=columns,
+                column_layouts=column_layouts,
                 source_record=None,
                 cell=cell,
             )
@@ -634,6 +654,7 @@ def _compile_dataframe_anchors(
                 row_idx=row_idx,
                 col_idx=col_idx,
                 columns=columns,
+                column_layouts=column_layouts,
                 source_record=None,
                 cell=cell,
             )
@@ -648,6 +669,7 @@ def _compile_dataframe_anchors(
             row_idx=row_idx,
             col_idx=col_idx,
             columns=columns,
+            column_layouts=column_layouts,
             source_record=source_record,
             cell=cell,
         )
@@ -664,6 +686,7 @@ def _dataframe_anchor(
     row_idx: int,
     col_idx: int,
     columns: list[str],
+    column_layouts: list[dict[str, Any]],
     source_record: dict[str, Any] | None,
     cell: CellSchema,
 ) -> dict[str, Any]:
@@ -675,10 +698,140 @@ def _dataframe_anchor(
         "start_row": row_idx,
         "start_col": col_idx,
         "columns": columns,
+        "column_layouts": column_layouts,
         "source": source_record["path"] if source_record else None,
         "source_format": source_record["format"] if source_record else None,
+        "source_rows": source_record["rows"] if source_record else None,
         "cell": cell,
     }
+
+
+def _column_layouts(
+    columns: list[str], options: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    configured = (options or {}).get("columns", {}) if isinstance(options, dict) else {}
+    layouts: list[dict[str, Any]] = []
+    offset = 0
+    for column in columns:
+        column_options = configured.get(column, {}) if isinstance(configured, dict) else {}
+        occupation = column_options.get("occupation", 1)
+        if not isinstance(occupation, int) or occupation <= 0:
+            raise ValueError(
+                f"dataframe column '{column}' occupation must be a positive integer"
+            )
+        alignment = column_options.get("alignment")
+        if alignment is not None and alignment not in _ALIGNMENTS:
+            raise ValueError(
+                f"dataframe column '{column}' alignment must be one of left, center, right"
+            )
+        layout: dict[str, Any] = {
+            "name": column,
+            "start_col_offset": offset,
+            "occupation": occupation,
+        }
+        if alignment is not None:
+            layout["alignment"] = alignment
+        layouts.append(layout)
+        offset += occupation
+    return layouts
+
+
+def _occupied_width(column_layouts: list[dict[str, Any]]) -> int:
+    if not column_layouts:
+        return 0
+    last = column_layouts[-1]
+    return int(last["start_col_offset"]) + int(last["occupation"])
+
+
+def _validate_template_merges_do_not_overlap_dataframes(sheet: dict[str, Any]) -> None:
+    if not sheet.get("merged_regions"):
+        return
+    dataframe_ranges = [
+        output_range
+        for anchor in sheet.get("dataframe_anchors", [])
+        for output_range in [_dataframe_output_range(anchor)]
+        if output_range is not None
+    ]
+    if not dataframe_ranges:
+        return
+    for region in sheet["merged_regions"]:
+        merge_range = CellRange(region)
+        for output_range in dataframe_ranges:
+            if _ranges_overlap(merge_range, output_range):
+                raise ValueError(
+                    "Template merged regions must not overlap dataframe output ranges"
+                )
+
+
+def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any]) -> None:
+    if not section.get("merged_regions"):
+        return
+    merge_ranges = [
+        CellRange(
+            min_col=merge["min_col"],
+            min_row=merge["min_row_offset"] + 1,
+            max_col=merge["max_col"],
+            max_row=merge["max_row_offset"] + 1,
+        )
+        for merge in section["merged_regions"]
+    ]
+    for record in section["records"]:
+        for anchor in record.get("dataframe_anchors", []):
+            output_range = _repeat_dataframe_output_range(anchor)
+            if output_range is None:
+                continue
+            for merge_range in merge_ranges:
+                if _ranges_overlap(merge_range, output_range):
+                    raise ValueError(
+                        "Template merged regions must not overlap dataframe output ranges"
+                    )
+
+
+def _dataframe_output_range(anchor: dict[str, Any]) -> CellRange | None:
+    width = _occupied_width(anchor.get("column_layouts", []))
+    if width <= 0:
+        return None
+    row_count = 1
+    if anchor["placeholder_type"] == "dataframe-content":
+        source_rows = anchor.get("source_rows", None)
+        if source_rows is None and anchor.get("source"):
+            source_rows = 1
+        row_count = int(source_rows or 0)
+    if row_count <= 0:
+        return None
+    return CellRange(
+        min_col=anchor["start_col"],
+        min_row=anchor["start_row"],
+        max_col=anchor["start_col"] + width - 1,
+        max_row=anchor["start_row"] + row_count - 1,
+    )
+
+
+def _repeat_dataframe_output_range(anchor: dict[str, Any]) -> CellRange | None:
+    width = _occupied_width(anchor.get("column_layouts", []))
+    if width <= 0:
+        return None
+    row_count = 1
+    if anchor["placeholder_type"] == "dataframe-content":
+        row_count = int(anchor.get("source_rows") or 0)
+    if row_count <= 0:
+        return None
+    start_row = anchor["start_row_offset"] + 1
+    return CellRange(
+        min_col=anchor["start_col"],
+        min_row=start_row,
+        max_col=anchor["start_col"] + width - 1,
+        max_row=start_row + row_count - 1,
+    )
+
+
+def _ranges_overlap(left: CellRange, right: CellRange) -> bool:
+    return (
+        left.min_col <= right.max_col
+        and left.max_col >= right.min_col
+        and left.min_row <= right.max_row
+        and left.max_row >= right.min_row
+    )
 
 
 # §4. Public Functions
@@ -688,6 +841,7 @@ def compile_report_bundle(
     template: WorkbookSchema,
     data: dict[str, Any],
     bundle_path: str | None = None,
+    dataframe_options: dict[str, Any] | None = None,
 ) -> ReportBundle:
     """Validate *data* against *template* and produce a directory ReportBundle."""
     bundle_dir = _prepare_bundle_dir(bundle_path)
@@ -704,6 +858,7 @@ def compile_report_bundle(
             data_sources=data_sources,
             used_ids=used_ids,
             source_cache=source_cache,
+            dataframe_options=dataframe_options or {},
         )
         for sheet, output_name, sheet_data, _ in _resolve_sheet_payloads(template, data)
     ]

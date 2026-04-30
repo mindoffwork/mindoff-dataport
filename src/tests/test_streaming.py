@@ -268,6 +268,23 @@ def test_streaming_applies_fixed_and_even_dimensions(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_streaming_inherits_anchor_row_height_for_dataframe_rows(managed_tmp_dir: Path):
+    schema = _schema({"A2": _cell("A2", "{{rows:dataframe-content}}")}, dims="A1:B2")
+    schema["sheets"][0]["row_heights"] = {"2": 24.0}
+
+    paths = _export_streaming(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2], "B": [3, 4]})}},
+        managed_tmp_dir,
+    )
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert ws.row_dimensions[2].height == pytest.approx(24.0)
+    assert ws.row_dimensions[3].height == pytest.approx(24.0)
+    wb.close()
+
+
 def test_streaming_preserves_static_merged_regions(managed_tmp_dir: Path):
     title = _cell("A1", "Merged Title")
     title["merged"] = True
@@ -307,7 +324,7 @@ def test_streaming_rejects_merged_regions_that_intersect_content(managed_tmp_dir
     )
     df = polars.DataFrame({"A": [1]})
 
-    with pytest.raises(ValueError, match="intersect dataframe-content"):
+    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
         _export_streaming(schema, {"Sheet1": {"rows": df}}, managed_tmp_dir)
 
 
@@ -325,6 +342,122 @@ def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
     assert cell.fill.fgColor.rgb == "FFFF0000"
     assert cell.number_format == "0.00"
     wb.close()
+
+
+def test_streaming_writes_dataframe_occupation_merges_and_alignment(managed_tmp_dir: Path):
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["fill"] = {"bg_color": "FFFFCC00"}
+    schema = _schema({"A1": anchor}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Employee Name": ["Alice"], "Amount": [12]})}},
+        dataframe_options={
+            "Sheet1": {
+                "rows": {
+                    "columns": {
+                        "Employee Name": {"occupation": 2, "alignment": "left"},
+                        "Amount": {"occupation": 3, "alignment": "right"},
+                    }
+                }
+            }
+        },
+    )
+
+    out = managed_tmp_dir / "occupied.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1", "C1:E1"]
+    assert ws["A1"].value == "Alice"
+    assert ws["C1"].value == 12
+    assert ws["A1"].alignment.horizontal == "left"
+    assert ws["C1"].alignment.horizontal == "right"
+    assert ws["A1"].fill.fgColor.rgb == "FFFFCC00"
+    wb.close()
+
+
+def test_streaming_writes_header_occupation_merges(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{headers:dataframe-header}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"headers": polars.DataFrame({"Amount": [12]})}},
+        dataframe_options={
+            "Sheet1": {
+                "headers": {
+                    "columns": {"Amount": {"occupation": 2, "alignment": "center"}}
+                }
+            }
+        },
+    )
+
+    out = managed_tmp_dir / "headers.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1"]
+    assert ws["A1"].value == "Amount"
+    assert ws["A1"].alignment.horizontal == "center"
+    wb.close()
+
+
+def test_fidelity_exports_file_backed_dataframe_with_occupation(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Amount": [12]})}},
+        dataframe_options={
+            "Sheet1": {
+                "rows": {
+                    "columns": {"Amount": {"occupation": 2, "alignment": "right"}}
+                }
+            }
+        },
+    )
+    out = managed_tmp_dir / "fidelity.xlsx"
+
+    mo_dataport.export(bundle, str(out), export_mode="fidelity")
+
+    wb = openpyxl.load_workbook(out)
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1"]
+    assert ws["A1"].value == 12
+    assert ws["A1"].alignment.horizontal == "right"
+    wb.close()
+
+
+def test_streaming_split_workbooks_preserve_occupation_merges(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B", "C"]})}},
+        dataframe_options={
+            "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+        },
+    )
+
+    paths = mo_dataport.export(
+        bundle,
+        str(managed_tmp_dir / "filled.xlsx"),
+        export_mode="streaming",
+        max_rows_per_workbook=2,
+    )
+
+    with ZipFile(paths[0]) as zip_file:
+        zip_file.extractall(path=managed_tmp_dir)
+
+    wb1 = openpyxl.load_workbook(managed_tmp_dir / "filled.part001.xlsx")
+    wb2 = openpyxl.load_workbook(managed_tmp_dir / "filled.part002.xlsx")
+    assert sorted(str(region) for region in wb1["Sheet1"].merged_cells.ranges) == [
+        "A1:B1",
+        "A2:B2",
+    ]
+    assert sorted(str(region) for region in wb2["Sheet1"].merged_cells.ranges) == ["A1:B1"]
+    assert wb1["Sheet1"]["A2"].value == "B"
+    assert wb2["Sheet1"]["A1"].value == "C"
+    wb1.close()
+    wb2.close()
 
 
 def test_streaming_expands_dynamic_sheet_names_in_order(managed_tmp_dir: Path):
@@ -416,6 +549,63 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
         "I",
         3,
     ]
+    wb.close()
+
+
+def test_streaming_repeat_dataframe_occupation_merges(managed_tmp_dir: Path):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{name:string}}"),
+            "A3": _cell("A3", "{{line_items:dataframe}}"),
+            "A4": _cell("A4", ""),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A5",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {
+                        "name": "Acme",
+                        "line_items": polars.DataFrame({"sku": ["A"], "qty": [1]}),
+                    }
+                ]
+            }
+        },
+        dataframe_options={
+            "Sheet1": {
+                "line_items": {
+                    "columns": {
+                        "sku": {"occupation": 2, "alignment": "left"},
+                        "qty": {"occupation": 2, "alignment": "right"},
+                    }
+                }
+            }
+        },
+    )
+
+    out = managed_tmp_dir / "repeat-occupied.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == [
+        "A2:B2",
+        "A3:B3",
+        "C2:D2",
+        "C3:D3",
+    ]
+    assert [ws["A2"].value, ws["C2"].value, ws["A3"].value, ws["C3"].value] == [
+        "sku",
+        "qty",
+        "A",
+        1,
+    ]
+    assert ws["A3"].alignment.horizontal == "left"
+    assert ws["C3"].alignment.horizontal == "right"
     wb.close()
 
 
