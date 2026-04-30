@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.2.0
 
 ### Fixes
 - Add configurable dataframe collision shifting during compile
