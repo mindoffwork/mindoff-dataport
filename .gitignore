@@ -53,6 +53,7 @@ AGENTS.md
 rewrite_author.sh
 
 # Generated example outputs
+playground/
 examples/output/*
 !examples/output/.gitkeep
 examples/repeat_block/output.xlsx
