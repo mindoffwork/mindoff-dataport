@@ -17,6 +17,7 @@ from mindoff_dataport.pdf_renderer import (
     _column_widths,
     _data_source_map,
     _dataframe_pdf_rows,
+    _chunked_row_tables,
     _hex_color,
     _paragraph,
     _repeat_record_rows,
@@ -750,6 +751,52 @@ def test_pdf_dataframe_rows_use_shifted_template_merges():
     assert rows[2]["merges"] == [
         {"min_row_offset": 0, "max_row_offset": 0, "min_col": 1, "max_col": 2}
     ]
+
+
+def test_pdf_chunks_keep_shifted_vertical_merges_together():
+    title = _cell("A2", "Totals")
+    title["merged"] = True
+    title["merge_anchor"] = "A2"
+    shadow_cells = {}
+    for coord in ["B2", "A3", "B3"]:
+        shadow = _cell(coord, None)
+        shadow["merged"] = True
+        shadow["merge_anchor"] = "A2"
+        shadow_cells[coord] = shadow
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+            "A2": title,
+            **shadow_cells,
+        },
+        dims="A1:B3",
+    )
+    schema["sheets"][0]["merged_regions"] = ["A2:B3"]
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+    )
+    sheet = bundle.report["sheets"][0]
+    rows = _dataframe_pdf_rows(
+        bundle,
+        _data_source_map(bundle),
+        sheet,
+        batch_size=1,
+    )
+
+    tables = list(
+        _chunked_row_tables(
+            sheet,
+            rows,
+            1,
+            2,
+            500,
+            _FontResolver(),
+            streaming_chunk_rows=1,
+        )
+    )
+
+    assert any(("SPAN", (0, 0), (1, 1)) in table._spanCmds for table in tables)
 
 
 def test_compile_dataframe_shift_horizontal_only_rejects_vertical_collision():
