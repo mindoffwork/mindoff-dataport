@@ -187,7 +187,7 @@ Example output:
 }
 ```
 
-### `compile(template, data, bundle_path=None, dataframe_options=None)` - `compile_report_bundle(...)`
+### `compile(template, data, bundle_path=None, dataframe_options=None, dataframe_shift="both")` - `compile_report_bundle(...)`
 
 Binds runtime data to the template, validates all inputs against the sheet contract, materialises Polars DataFrames / LazyFrames to Parquet, and produces a `ReportBundle`.
 
@@ -197,6 +197,7 @@ Binds runtime data to the template, validates all inputs against the sheet contr
 | `data`              | `dict[str, Any]`         | Yes      | Sheet-scoped payload. See [Data Contract](#data-contract)                                   |
 | `bundle_path`       | `str \| None`            | No       | If provided, writes the bundle as a directory at this path. Omit for in-memory only         |
 | `dataframe_options` | `dict[str, Any] \| None` | No       | Per-sheet, per-placeholder dataframe layout overrides. See [Dataframe Column Layout](#dataframe-column-layout) |
+| `dataframe_shift`   | `str`                    | No       | How normal-sheet template cells/merges move around dataframe output: `"both"`, `"horizontal"`, `"vertical"`, or `"none"` |
 
 **Returns:** `ReportBundle`
 
@@ -400,6 +401,29 @@ Rules:
 - Options are keyed by resolved output sheet name, then placeholder key
 - Unconfigured dataframe columns default to `occupation=1` and keep the template cell alignment
 
+### Dataframe Collision Shifting
+
+When dataframe output expands into adjacent template space, `compile()` can move normal-sheet template cells and merged regions out of the dataframe range before XLSX or PDF export.
+
+```python
+bundle = mo_dataport.compile(
+    schema,
+    data,
+    dataframe_shift="both",  # "both", "horizontal", "vertical", or "none"
+)
+```
+
+| Mode           | Behavior                                                                       |
+|----------------|--------------------------------------------------------------------------------|
+| `"both"`       | Shift right-side cells/merges horizontally and lower cells/merges vertically   |
+| `"horizontal"` | Shift only cells/merges to the right of dataframe output                       |
+| `"vertical"`   | Shift only cells/merges below dataframe output                                 |
+| `"none"`       | Do not shift; template merges that overlap dataframe output raise `ValueError` |
+
+The shift is metadata-only: dataframe rows remain in Parquet, `report.json` stores compact anchors, and streaming export still reads rows in batches. The same shifted bundle layout is used by XLSX and PDF. Repeat sections keep their stricter merge rules.
+
+See `examples/dataframe_shift/xlsx.py` and `examples/dataframe_shift/pdf.py`.
+
 ### XLSX Options
 
 | Option                  | Type    | Default       | Description                                                                              |
@@ -416,7 +440,7 @@ Rules:
 **Streaming mode constraints:**
 
 - No `hug` sizing
-- No merged cells intersecting `dataframe-content` output rows
+- No merged cells may remain intersecting `dataframe-content` output rows after compile-time `dataframe_shift`
 - Only one `dataframe-content` placeholder per non-repeat sheet
 
 **Split output:** When `max_rows_per_workbook` is exceeded in streaming mode, `export()` writes workbook parts, bundles them into `output.zip`, deletes the individual part files, and returns a one-item `list[str]` containing the zip path.

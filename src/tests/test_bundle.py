@@ -609,7 +609,230 @@ def test_compile_scopes_dataframe_column_layouts_by_placeholder_key():
     assert content["column_layouts"][0]["alignment"] == "right"
 
 
-def test_compile_rejects_template_merge_over_dataframe_occupied_range():
+def test_compile_shifts_right_side_merge_away_from_dataframe_occupied_range(
+    managed_tmp_dir: Path,
+):
+    title = _cell("B1", "Merged Title")
+    title["merged"] = True
+    title["merge_anchor"] = "B1"
+    shadow = _cell("C1", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "B1"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "B1": title, "C1": shadow},
+        dims="A1:C1",
+    )
+    schema["sheets"][0]["merged_regions"] = ["B1:C1"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
+        dataframe_options={
+            "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+        },
+        dataframe_shift="horizontal",
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["merged_regions"] == ["C1:D1"]
+    assert sheet["cells"]["C1"]["value"] == "Merged Title"
+
+    out = managed_tmp_dir / "shifted-right.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == [
+        "A1:B1",
+        "C1:D1",
+    ]
+    assert ws["A1"].value == "A"
+    assert ws["C1"].value == "Merged Title"
+    wb.close()
+
+
+def test_compile_shifts_bottom_merge_below_dataframe_rows(managed_tmp_dir: Path):
+    title = _cell("A2", "Totals")
+    title["merged"] = True
+    title["merge_anchor"] = "A2"
+    shadow = _cell("B2", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "A2"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "A2": title, "B2": shadow},
+        dims="A1:B2",
+    )
+    schema["sheets"][0]["merged_regions"] = ["A2:B2"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+        dataframe_shift="vertical",
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["merged_regions"] == ["A3:B3"]
+    assert sheet["cells"]["A3"]["value"] == "Totals"
+
+    out = managed_tmp_dir / "shifted-bottom.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A3:B3"]
+    assert [ws["A1"].value, ws["A2"].value, ws["A3"].value] == ["A", "B", "Totals"]
+    wb.close()
+
+
+def test_compile_shifts_diagonal_merge_right_and_down(managed_tmp_dir: Path):
+    title = _cell("B2", "Notes")
+    title["merged"] = True
+    title["merge_anchor"] = "B2"
+    shadow = _cell("C2", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "B2"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "B2": title, "C2": shadow},
+        dims="A1:C2",
+    )
+    schema["sheets"][0]["merged_regions"] = ["B2:C2"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+        dataframe_options={
+            "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+        },
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["merged_regions"] == ["C3:D3"]
+    assert sheet["cells"]["C3"]["value"] == "Notes"
+
+    out = managed_tmp_dir / "shifted-diagonal.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == [
+        "A1:B1",
+        "A2:B2",
+        "C3:D3",
+    ]
+    assert [ws["A1"].value, ws["A2"].value, ws["C3"].value] == ["A", "B", "Notes"]
+    wb.close()
+
+
+def test_pdf_dataframe_rows_use_shifted_template_merges():
+    title = _cell("A2", "Totals")
+    title["merged"] = True
+    title["merge_anchor"] = "A2"
+    shadow = _cell("B2", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "A2"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "A2": title, "B2": shadow},
+        dims="A1:B2",
+    )
+    schema["sheets"][0]["merged_regions"] = ["A2:B2"]
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+    )
+
+    rows = list(
+        _dataframe_pdf_rows(
+            bundle,
+            _data_source_map(bundle),
+            bundle.report["sheets"][0],
+            batch_size=1,
+        )
+    )
+
+    assert rows[2]["cells"][1]["value"] == "Totals"
+    assert rows[2]["merges"] == [
+        {"min_row_offset": 0, "max_row_offset": 0, "min_col": 1, "max_col": 2}
+    ]
+
+
+def test_compile_dataframe_shift_horizontal_only_rejects_vertical_collision():
+    title = _cell("A2", "Totals")
+    title["merged"] = True
+    title["merge_anchor"] = "A2"
+    shadow = _cell("B2", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "A2"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "A2": title, "B2": shadow},
+        dims="A1:B2",
+    )
+    schema["sheets"][0]["merged_regions"] = ["A2:B2"]
+
+    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+            dataframe_shift="horizontal",
+        )
+
+
+def test_compile_dataframe_shift_vertical_only_rejects_horizontal_collision():
+    title = _cell("B1", "Merged Title")
+    title["merged"] = True
+    title["merge_anchor"] = "B1"
+    shadow = _cell("C1", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "B1"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "B1": title, "C1": shadow},
+        dims="A1:C1",
+    )
+    schema["sheets"][0]["merged_regions"] = ["B1:C1"]
+
+    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
+            dataframe_options={
+                "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+            },
+            dataframe_shift="vertical",
+        )
+
+
+def test_compile_dataframe_shift_none_uses_strict_overlap_validation():
+    title = _cell("B1", "Merged Title")
+    title["merged"] = True
+    title["merge_anchor"] = "B1"
+    shadow = _cell("C1", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "B1"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "B1": title, "C1": shadow},
+        dims="A1:C1",
+    )
+    schema["sheets"][0]["merged_regions"] = ["B1:C1"]
+
+    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
+            dataframe_options={
+                "Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}
+            },
+            dataframe_shift="none",
+        )
+
+
+def test_compile_rejects_invalid_dataframe_shift_mode():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:A1")
+
+    with pytest.raises(ValueError, match="dataframe_shift"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
+            dataframe_shift="diagonal",
+        )
+
+
+def test_compile_rejects_template_merge_covering_dataframe_anchor():
     anchor = _cell("A1", "{{rows:dataframe-content}}")
     anchor["merged"] = True
     anchor["merge_anchor"] = "A1"
@@ -617,18 +840,10 @@ def test_compile_rejects_template_merge_over_dataframe_occupied_range():
     shadow["merged"] = True
     shadow["merge_anchor"] = "A1"
     schema = _schema({"A1": anchor, "B1": shadow}, dims="A1:B1")
-    schema["sheets"][0]["merged_regions"] = ["B1:B1"]
+    schema["sheets"][0]["merged_regions"] = ["A1:B1"]
 
     with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
-        mo_dataport.compile(
-            schema,
-            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}},
-            dataframe_options={
-                "Sheet1": {
-                    "rows": {"columns": {"Name": {"occupation": 2}}}
-                }
-            },
-        )
+        mo_dataport.compile(schema, {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}})
 
 
 def test_compile_rejects_invalid_dataframe_column_layout_options():

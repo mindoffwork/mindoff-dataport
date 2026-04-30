@@ -34,7 +34,7 @@ Stable unless explicitly changed:
 
 - `extract_template(path)` / `extract(path)`
 - `get_template_inputs(schema)` / `inputs(schema)`
-- `compile_report_bundle(template, data, bundle_path=None, dataframe_options=None)` / `compile(template, data, bundle_path=None, dataframe_options=None)`
+- `compile_report_bundle(template, data, bundle_path=None, dataframe_options=None, dataframe_shift="both")` / `compile(template, data, bundle_path=None, dataframe_options=None, dataframe_shift="both")`
 - `export_report_bundle(bundle_or_path, output_path, format="xlsx", **options)` / `export(bundle_or_path, output_path, format="xlsx", **options)`
 
 Notes:
@@ -67,7 +67,7 @@ Notes:
 - Preserve sheet gridline visibility via `show_gridlines`.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
-- Compile rejects template merges that overlap dataframe header/content output ranges; streaming still allows one `dataframe-content` placeholder per non-repeat sheet and no `hug`.
+- Compile `dataframe_shift` controls normal-sheet template cell/merge movement around dataframe output: `"both"`, `"horizontal"`, `"vertical"`, or `"none"`; merges covering dataframe anchors still fail. Streaming still allows one `dataframe-content` placeholder per non-repeat sheet and no `hug`.
 
 ## 5) Sizing
 
