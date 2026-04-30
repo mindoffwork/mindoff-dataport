@@ -9,6 +9,9 @@
 ### Documentation
 - 📝 Refresh README documentation ([#2](https://github.com/mindoffwork/mindoff-dataport/pull/2))
 
+### Features
+- ✨ Add configurable collision shifting and PDF chunking coverage ([#3](https://github.com/mindoffwork/mindoff-dataport/pull/3))
+
 ## v0.1.0
 
 ### Enhancements
