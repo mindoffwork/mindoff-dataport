@@ -8,6 +8,8 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 [![PyPI version](https://img.shields.io/pypi/v/mindoff-dataport.svg?logo=pypi&logoColor=white)](https://pypi.org/project/mindoff-dataport/)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://github.com/mindoffwork/mindoff-dataport/actions/workflows/root_ci.yml)
 
+**Source**: [https://github.com/mindoffwork/mindoff-dataport](https://github.com/mindoffwork/mindoff-dataport)
+
 ## Key Features
 
 1. **Template-First Report Generation**  
@@ -27,10 +29,6 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 
 6. **Runtime Layout Control Without Template Rework**  
    Fine-tune output layout programmatically without redesigning the original workbook.
-
-**Source**: [https://github.com/mindoffwork/mindoff-dataport](https://github.com/mindoffwork/mindoff-dataport)
-
----
 
 ## Documentation
 ### Table of Contents
@@ -52,8 +50,6 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 15. [Current Scope](#15-current-scope)
 16. [License](#16-license)
 
----
-
 ## 1. Purpose
 
 Mindoff Dataport is built to turn Excel-based report designs into reusable, data-driven outputs with a template format that is convenient to create, review, and maintain.
@@ -63,8 +59,6 @@ Mindoff Dataport is built to turn Excel-based report designs into reusable, data
 - Generate both Excel and PDF from the same report source, so teams do not maintain separate reporting flows.
 - Scale one template into many outputs, whether that means repeated sections, multiple sheets, or report variants for different audiences.
 - Support larger exports more reliably as report volume grows.
-
----
 
 ## 2. Install
 
@@ -77,8 +71,6 @@ For dataframe support (required when passing Polars DataFrames or LazyFrames):
 ```bash
 pip install "mindoff-dataport[polars]"
 ```
-
----
 
 ## 3. Quick Start
 
@@ -118,8 +110,6 @@ mo_dataport.export(bundle, "invoice_filled.xlsx")
 # 4b. Export to PDF
 mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 ```
-
----
 
 ## 4. Core Concepts
 
@@ -163,8 +153,6 @@ from mindoff_dataport import (
 
 `mo_dataport.extract` / `mo_dataport.inputs` / `mo_dataport.compile` / `mo_dataport.export` are short aliases for the same functions.
 
----
-
 ## 5. API Reference
 
 ### `extract(path)` — `extract_template(path)`
@@ -176,8 +164,6 @@ Reads an `.xlsx` file and returns a `WorkbookSchema` containing cell styles, dim
 | `path`    | `str` | Yes      | Path to the `.xlsx` template file    |
 
 **Returns:** `WorkbookSchema`
-
----
 
 ### `inputs(schema)` — `get_template_inputs(schema)`
 
@@ -201,8 +187,6 @@ Example output:
 }
 ```
 
----
-
 ### `compile(template, data, bundle_path=None, dataframe_options=None)` - `compile_report_bundle(...)`
 
 Binds runtime data to the template, validates all inputs against the sheet contract, materialises Polars DataFrames / LazyFrames to Parquet, and produces a `ReportBundle`.
@@ -218,8 +202,6 @@ Binds runtime data to the template, validates all inputs against the sheet contr
 
 **Raises:** `KeyError` if a required placeholder key is missing from the payload.
 
----
-
 ### `export(bundle_or_path, output_path, format="xlsx", **options)` — `export_report_bundle(...)`
 
 Renders the bundle to a file. Accepts an in-memory `ReportBundle` or a path to a persisted bundle directory.
@@ -232,8 +214,6 @@ Renders the bundle to a file. Accepts an in-memory `ReportBundle` or a path to a
 | `**options`      | —                     | No       | —         | Sizing and format-specific options. See [Export Options](#export-options)       |
 
 **Returns:** `None` for `"fidelity"` XLSX and all PDF exports. `list[str]` for `"streaming"` XLSX: one workbook path when no split is needed, or one `.zip` path when the export is split across workbooks.
-
----
 
 ## 6. Template Placeholders
 
@@ -288,8 +268,6 @@ Used in pairs to define a block that is rendered once per record in an ordered l
 | `repeat-end`    | Marks the last row of the repeating block (control row, not rendered)  |
 
 See [Repeat Sections](#repeat-sections) for usage.
-
----
 
 ## 7. Data Contract
 
@@ -370,13 +348,9 @@ bundle = mo_dataport.compile(schema, {"Sheet1": {"sales_rows": rows}})
 
 Polars `LazyFrame` inputs remain disk-backed until export time; rows are never fully materialised in memory.
 
----
-
 ## 8. Export Options
 
 All options are passed as keyword arguments to `export()`.
-
----
 
 ## 9. Dataframe Column Layout
 
@@ -426,8 +400,6 @@ Rules:
 - Options are keyed by resolved output sheet name, then placeholder key
 - Unconfigured dataframe columns default to `occupation=1` and keep the template cell alignment
 
----
-
 ### XLSX Options
 
 | Option                  | Type    | Default       | Description                                                                              |
@@ -449,8 +421,6 @@ Rules:
 
 **Split output:** When `max_rows_per_workbook` is exceeded in streaming mode, `export()` writes workbook parts, bundles them into `output.zip`, deletes the individual part files, and returns a one-item `list[str]` containing the zip path.
 
----
-
 ### PDF Options
 
 PDF-specific options are passed as keyword arguments alongside sizing options.
@@ -468,8 +438,6 @@ PDF-specific options are passed as keyword arguments alongside sizing options.
 | `default_row_height`    | `float`           | schema value  | Same as XLSX                                                         |
 
 > `export_mode` is ignored for PDF; PDF always paginates automatically.
-
----
 
 ## 10. Sizing Options
 
@@ -504,8 +472,6 @@ For PDF sheets that render `dataframe-content`, `row_height_mode="hug"` is suppo
 | `margin` (PDF)         | Points (1pt = 1/72 inch)     | `36`              |
 
 Kwargs passed to `export()` override values stored in the template schema.
-
----
 
 ## 11. Supported Styling
 
@@ -563,8 +529,6 @@ Merged regions are extracted from the template and preserved in both XLSX and PD
 ### Sheet Gridlines
 
 The template's `show_gridlines` property is preserved in XLSX output.
-
----
 
 ## 12. Custom Fonts for PDF
 
@@ -633,8 +597,6 @@ fonts={
 - Each family **must** supply a `regular` file; omitting it raises `ValueError`
 - Font files are registered with ReportLab once per process; re-registering the same path is a no-op
 
----
-
 ## 13. ReportBundle Directory
 
 When `bundle_path` is passed to `compile()`, the bundle is persisted as a directory. The same directory can be re-loaded and re-exported without rerunning `compile()`.
@@ -660,8 +622,6 @@ bundle = ReportBundle.load("report_bundle/")
 
 Setting `auto_delete_bundle=True` in `export()` deletes the bundle directory after a successful export.
 
----
-
 ## 14. Recipes
 
 ### Scalar Values + Dataframe Table
@@ -686,8 +646,6 @@ bundle = mo_dataport.compile(
 )
 mo_dataport.export(bundle, "report.xlsx", export_mode="streaming")
 ```
-
----
 
 ### Repeat Sections (per-customer invoice blocks)
 
@@ -727,8 +685,6 @@ Repeat section constraints:
 - Merged cells are supported in fixed/static rows, but **not** over `dataframe-content` rows
 - No nested repeats
 
----
-
 ### Dynamic Sheets (one sheet per region)
 
 ```python
@@ -743,8 +699,6 @@ bundle = mo_dataport.compile(
 )
 mo_dataport.export(bundle, "regions.xlsx", export_mode="streaming")
 ```
-
----
 
 ### Dataframe Column Occupation and Alignment
 
@@ -793,8 +747,6 @@ mo_dataport.export(
 
 See `examples/dataframe_column_layout/xlsx.py` and `examples/dataframe_column_layout/pdf.py`.
 
----
-
 ### Discover Inputs Before Compiling
 
 ```python
@@ -803,8 +755,6 @@ import pprint
 pprint.pp(mo_dataport.inputs(schema))
 # {'Sales Summary': {'report_title': 'string', 'generated_on': 'date', 'sales_rows': 'dataframe'}}
 ```
-
----
 
 ### Persist Bundle for Later Re-Export
 
@@ -815,8 +765,6 @@ bundle = mo_dataport.compile(schema, data, bundle_path="saved_bundle")
 mo_dataport.export("saved_bundle", "report.xlsx")
 mo_dataport.export("saved_bundle", "report.pdf", format="pdf")
 ```
-
----
 
 ### Split Large Exports Across Workbooks
 
@@ -829,8 +777,6 @@ outputs = mo_dataport.export(
 )
 # outputs -> list[str] with a single `.zip` path when the export is split
 ```
-
----
 
 ### PDF with Custom Fonts and Landscape Layout
 
@@ -853,8 +799,6 @@ mo_dataport.export(
 )
 ```
 
----
-
 ## 15. Current Scope
 
 | Feature                  | Status                             |
@@ -867,8 +811,6 @@ mo_dataport.export(
 | Image export             | Reserved — raises `NotImplementedError` in v1 |
 | Nested repeat sections   | Not supported in v1                |
 | Patterned fills          | Not extracted or rendered          |
-
----
 
 ## 16. License
 
