@@ -203,6 +203,7 @@ def _compile_sheet(
             used_ids=used_ids,
             source_cache=source_cache,
             dataframe_options=dataframe_options,
+            dataframe_shift=dataframe_shift,
         )
 
     min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
@@ -325,6 +326,7 @@ def _compile_repeat_sheet(
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
     dataframe_options: dict[str, Any],
+    dataframe_shift: str,
 ) -> dict[str, Any]:
     for repeat in repeats:
         _validate_repeat_layout(sheet, repeat)
@@ -358,11 +360,12 @@ def _compile_repeat_sheet(
             output_name=output_name,
             sheet_data=sheet_data,
             bundle_dir=bundle_dir,
-                data_sources=data_sources,
-                used_ids=used_ids,
-                source_cache=source_cache,
-                dataframe_options=dataframe_options,
-            )
+            data_sources=data_sources,
+            used_ids=used_ids,
+            source_cache=source_cache,
+            dataframe_options=dataframe_options,
+            dataframe_shift=dataframe_shift,
+        )
         repeat_sections.append(section)
         max_col = max(max_col, section_max_col)
 
@@ -389,6 +392,7 @@ def _compile_repeat_section(
     used_ids: set[str],
     source_cache: dict[int, dict[str, Any]],
     dataframe_options: dict[str, Any],
+    dataframe_shift: str,
 ) -> tuple[dict[str, Any], int]:
     repeat_key = repeat["key"]
     records = sheet_data[repeat_key]
@@ -434,11 +438,30 @@ def _compile_repeat_section(
                     max_col,
                     anchor["start_col"] + max(_occupied_width(anchor["column_layouts"]) - 1, 0),
                 )
+        (
+            record_cells,
+            record_anchors,
+            record_merges,
+            record_block_height,
+        ) = _shift_repeat_record_content_around_dataframes(
+            record_cells,
+            record_anchors,
+            repeat_merges,
+            block_height=block_height,
+            dataframe_shift=dataframe_shift,
+        )
+        for anchor in record_anchors:
+            output_range = _repeat_dataframe_output_range(anchor)
+            if output_range is None:
+                continue
+            max_col = max(max_col, output_range.max_col)
         compiled_records.append(
             {
                 "index": index,
+                "block_height": record_block_height,
                 "cells": record_cells,
                 "dataframe_anchors": record_anchors,
+                "merged_regions": record_merges,
             }
         )
     section = {
@@ -548,6 +571,108 @@ def _repeat_merged_regions(
             }
         )
     return regions
+
+
+def _shift_repeat_record_content_around_dataframes(
+    record_cells: list[dict[str, Any]],
+    record_anchors: list[dict[str, Any]],
+    merged_regions: list[dict[str, Any]],
+    *,
+    block_height: int,
+    dataframe_shift: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
+    if dataframe_shift == "none":
+        return record_cells, record_anchors, merged_regions, block_height
+    footprints = _repeat_dataframe_shift_footprints(record_anchors)
+    if not footprints:
+        return record_cells, record_anchors, merged_regions, block_height
+
+    merge_shifts: dict[tuple[int, int], tuple[int, int]] = {}
+    shifted_merges: list[dict[str, Any]] = []
+    max_row_offset = max(block_height - 1, 0)
+    for merge in merged_regions:
+        merge_range = CellRange(
+            min_col=merge["min_col"],
+            min_row=merge["min_row_offset"] + 1,
+            max_col=merge["max_col"],
+            max_row=merge["max_row_offset"] + 1,
+        )
+        row_shift, col_shift = _shift_for_range(
+            merge_range, footprints, dataframe_shift=dataframe_shift
+        )
+        shifted = _shift_range(merge_range, row_shift, col_shift)
+        shifted_merges.append(
+            {
+                "min_row_offset": shifted.min_row - 1,
+                "max_row_offset": shifted.max_row - 1,
+                "min_col": shifted.min_col,
+                "max_col": shifted.max_col,
+            }
+        )
+        max_row_offset = max(max_row_offset, shifted.max_row - 1)
+        for row_idx in range(merge_range.min_row, merge_range.max_row + 1):
+            for col_idx in range(merge_range.min_col, merge_range.max_col + 1):
+                merge_shifts[(row_idx - 1, col_idx)] = (row_shift, col_shift)
+
+    shifted_cells: list[dict[str, Any]] = []
+    for item in record_cells:
+        row_offset = int(item["row_offset"])
+        start_col = int(item["start_col"])
+        row_shift, col_shift = merge_shifts.get(
+            (row_offset, start_col),
+            _shift_for_cell(
+                row_offset + 1, start_col, footprints, dataframe_shift=dataframe_shift
+            ),
+        )
+        shifted_cell = _shift_cell(item["cell"], row_shift, col_shift)
+        shifted_cells.append(
+            {
+                "row_offset": row_offset + row_shift,
+                "start_col": start_col + col_shift,
+                "cell": shifted_cell,
+            }
+        )
+        max_row_offset = max(max_row_offset, row_offset + row_shift)
+
+    for anchor in record_anchors:
+        output_range = _repeat_dataframe_output_range(anchor)
+        if output_range is not None:
+            max_row_offset = max(max_row_offset, output_range.max_row - 1)
+
+    return shifted_cells, record_anchors, shifted_merges, max_row_offset + 1
+
+
+def _repeat_dataframe_shift_footprints(
+    anchors: list[dict[str, Any]],
+) -> list[dict[str, int]]:
+    grouped: dict[tuple[str, str, int], dict[str, int]] = {}
+    for anchor in anchors:
+        output_range = _repeat_dataframe_output_range(anchor)
+        if output_range is None:
+            continue
+        key = (anchor["coordinate"], anchor["key"], int(anchor["start_col"]))
+        item = grouped.get(key)
+        if item is None:
+            grouped[key] = {
+                "start_row": output_range.min_row,
+                "start_col": output_range.min_col,
+                "max_row": output_range.max_row,
+                "max_col": output_range.max_col,
+                "row_delta": 0,
+                "col_delta": output_range.max_col - output_range.min_col,
+            }
+            continue
+        item["start_row"] = min(item["start_row"], output_range.min_row)
+        item["max_row"] = max(item["max_row"], output_range.max_row)
+        item["max_col"] = max(item["max_col"], output_range.max_col)
+        item["col_delta"] = max(
+            item["col_delta"], output_range.max_col - output_range.min_col
+        )
+
+    footprints = list(grouped.values())
+    for item in footprints:
+        item["row_delta"] = item["max_row"] - item["start_row"]
+    return footprints
 
 
 def _compile_cell(
@@ -964,18 +1089,19 @@ def _validate_template_merges_do_not_overlap_dataframes(sheet: dict[str, Any]) -
 
 
 def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any]) -> None:
-    if not section.get("merged_regions"):
-        return
-    merge_ranges = [
-        CellRange(
-            min_col=merge["min_col"],
-            min_row=merge["min_row_offset"] + 1,
-            max_col=merge["max_col"],
-            max_row=merge["max_row_offset"] + 1,
-        )
-        for merge in section["merged_regions"]
-    ]
     for record in section["records"]:
+        merges = record.get("merged_regions", section.get("merged_regions", []))
+        if not merges:
+            continue
+        merge_ranges = [
+            CellRange(
+                min_col=merge["min_col"],
+                min_row=merge["min_row_offset"] + 1,
+                max_col=merge["max_col"],
+                max_row=merge["max_row_offset"] + 1,
+            )
+            for merge in merges
+        ]
         for anchor in record.get("dataframe_anchors", []):
             output_range = _repeat_dataframe_output_range(anchor)
             if output_range is None:

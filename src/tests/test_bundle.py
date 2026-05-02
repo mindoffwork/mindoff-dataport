@@ -721,6 +721,70 @@ def test_compile_shifts_diagonal_merge_right_and_down(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_compile_shifts_repeat_record_cells_around_dataframe_output():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "Customer: {{customer_name:string}}"),
+            "A3": _cell("A3", "{{region:string}}"),
+            "A4": _cell("A4", "{{line_items:dataframe-header}}"),
+            "C4": _cell("C4", "{{note:string}}"),
+            "A5": _cell("A5", "{{line_items:dataframe-content}}"),
+            "A6": _cell("A6", "{{footer:string}}"),
+            "A7": _cell("A7", "{{reports:repeat-end}}"),
+        },
+        dims="A1:C7",
+    )
+
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {
+                        "customer_name": "Acme",
+                        "region": "North",
+                        "line_items": polars.DataFrame({"Item": ["A", "B"]}),
+                        "note": "Side 1",
+                        "footer": "Below 1",
+                    },
+                    {
+                        "customer_name": "Globex",
+                        "region": "South",
+                        "line_items": polars.DataFrame({"Item": ["C"]}),
+                        "note": "Side 2",
+                        "footer": "Below 2",
+                    },
+                ]
+            }
+        },
+        dataframe_options={
+            "Sheet1": {"line_items": {"columns": {"Item": {"occupation": 2}}}}
+        },
+    )
+
+    section = bundle.report["sheets"][0]["repeat_sections"][0]
+    first = section["records"][0]
+    second = section["records"][1]
+
+    assert first["block_height"] == 6
+    assert second["block_height"] == 5
+    assert {(item["cell"]["value"], item["row_offset"], item["start_col"]) for item in first["cells"]} == {
+        ("Customer: Acme", 0, 1),
+        ("North", 1, 1),
+        ("Side 1", 2, 4),
+        ("Below 1", 5, 1),
+    }
+    assert {(item["cell"]["value"], item["row_offset"], item["start_col"]) for item in second["cells"]} == {
+        ("Customer: Globex", 0, 1),
+        ("South", 1, 1),
+        ("Side 2", 2, 4),
+        ("Below 2", 4, 1),
+    }
+    assert [anchor["start_row_offset"] for anchor in first["dataframe_anchors"]] == [2, 3]
+    assert [anchor["start_col"] for anchor in first["dataframe_anchors"]] == [1, 1]
+
+
 def test_pdf_dataframe_rows_use_shifted_template_merges():
     title = _cell("A2", "Totals")
     title["merged"] = True
