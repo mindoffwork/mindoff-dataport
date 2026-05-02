@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Fixes
+- 🐞 Fix repeat-sheet dataframe-content row offsets in streaming export ([#6](https://github.com/mindoffwork/mindoff-dataport/pull/6))
 - 🐞 Fix dataframe shifting issue with repeat blocks ([#4](https://github.com/mindoffwork/mindoff-dataport/pull/4))
 
 ### Enhancements
