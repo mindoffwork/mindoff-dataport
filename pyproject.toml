@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mindoff-dataport"
-version = "0.2.0"
+version = "0.3.0"
 description = "Extract xlsx templates with full visual fidelity and render data-driven reports in xlsx and PDF formats."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
