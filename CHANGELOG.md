@@ -1,5 +1,10 @@
 <h1>Release Notes</h1>
 
+## Recent Changes
+
+### Fixes
+- 🐞 Fix dataframe shifting issue with repeat blocks ([#4](https://github.com/mindoffwork/mindoff-dataport/pull/4))
+
 ## v0.2.0
 
 ### Fixes
