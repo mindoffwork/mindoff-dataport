@@ -9,6 +9,9 @@
 ### Enhancements
 - ✨ Expand style extraction and rendering support ([#5](https://github.com/mindoffwork/mindoff-dataport/pull/5))
 
+### Features
+- ✨ Add page break extraction and export support ([#7](https://github.com/mindoffwork/mindoff-dataport/pull/7))
+
 ## v0.2.0
 
 ### Fixes
