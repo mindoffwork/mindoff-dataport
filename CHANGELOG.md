@@ -5,6 +5,9 @@
 ### Fixes
 - 🐞 Fix dataframe shifting issue with repeat blocks ([#4](https://github.com/mindoffwork/mindoff-dataport/pull/4))
 
+### Enhancements
+- ✨ Expand style extraction and rendering support ([#5](https://github.com/mindoffwork/mindoff-dataport/pull/5))
+
 ## v0.2.0
 
 ### Fixes
