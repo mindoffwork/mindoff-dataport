@@ -619,7 +619,7 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
 
     wb = openpyxl.load_workbook(paths[0], data_only=True)
     ws = wb["Sheet1"]
-    assert [ws["A1"].value, ws["A4"].value, ws["A7"].value] == [
+    assert [ws["A1"].value, ws["A5"].value, ws["A9"].value] == [
         "Acme",
         "Globex",
         "Initech",
@@ -630,7 +630,7 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
         "A",
         1,
     ]
-    assert [ws["A8"].value, ws["B8"].value, ws["A9"].value, ws["B9"].value] == [
+    assert [ws["A10"].value, ws["B10"].value, ws["A11"].value, ws["B11"].value] == [
         "sku",
         "qty",
         "I",
@@ -693,6 +693,96 @@ def test_streaming_repeat_dataframe_occupation_merges(managed_tmp_dir: Path):
     ]
     assert ws["A3"].alignment.horizontal == "left"
     assert ws["C3"].alignment.horizontal == "right"
+    wb.close()
+
+
+def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
+    managed_tmp_dir: Path,
+):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "Customer: {{customer_name:string}}"),
+            "A3": _cell("A3", "{{region:string}}"),
+            "A4": _cell("A4", "{{line_items:dataframe-header}}"),
+            "C4": _cell("C4", "{{note:string}}"),
+            "A5": _cell("A5", "{{line_items:dataframe-content}}"),
+            "A6": _cell("A6", "{{footer:string}}"),
+            "A7": _cell("A7", "{{reports:repeat-end}}"),
+        },
+        dims="A1:C7",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {
+                        "customer_name": "Acme",
+                        "region": "North",
+                        "line_items": polars.DataFrame({"Item": ["A", "B"]}),
+                        "note": "Side 1",
+                        "footer": "Below 1",
+                    },
+                    {
+                        "customer_name": "Globex",
+                        "region": "South",
+                        "line_items": polars.DataFrame({"Item": ["C"]}),
+                        "note": "Side 2",
+                        "footer": "Below 2",
+                    },
+                ]
+            }
+        },
+        dataframe_options={
+            "Sheet1": {"line_items": {"columns": {"Item": {"occupation": 2}}}}
+        },
+    )
+
+    out = managed_tmp_dir / "repeat-shift.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [
+        ws["A1"].value,
+        ws["A2"].value,
+        ws["A3"].value,
+        ws["A4"].value,
+        ws["A5"].value,
+        ws["A7"].value,
+    ] == [
+        "Customer: Acme",
+        "North",
+        "Item",
+        "A",
+        "B",
+        "Below 1",
+    ]
+    assert [
+        ws["D3"].value,
+        ws["A8"].value,
+        ws["A9"].value,
+        ws["A10"].value,
+        ws["A11"].value,
+        ws["A12"].value,
+        ws["D10"].value,
+    ] == [
+        "Side 1",
+        "Customer: Globex",
+        "South",
+        "Item",
+        "C",
+        "Below 2",
+        "Side 2",
+    ]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == [
+        "A10:B10",
+        "A11:B11",
+        "A3:B3",
+        "A4:B4",
+        "A5:B5",
+    ]
     wb.close()
 
 

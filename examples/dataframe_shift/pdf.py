@@ -16,6 +16,26 @@ DATA_PARQUET = HERE / "data.parquet"
 OUTPUT_PDF = HERE / "output.pdf"
 
 
+def _report_payload(rows: pl.LazyFrame) -> list[dict]:
+    reports = [
+        {
+            "customer_name": "Alpha Team",
+            "region": "North",
+            "line_items": rows,
+            "note": "Shift right of dataframe",
+            "footer": "Shift below dataframe",
+        },
+        {
+            "customer_name": "Beta Team",
+            "region": "South",
+            "line_items": rows,
+            "note": "Repeat block stays aligned",
+            "footer": "Footer follows dataframe rows",
+        }
+    ]
+    return reports
+
+
 def main() -> None:
     started = perf_counter()
 
@@ -23,7 +43,7 @@ def main() -> None:
     rows = pl.scan_parquet(DATA_PARQUET).select(["Employee", "Amount"])
     bundle = mo_dataport.compile(
         schema,
-        {"Shift Demo": {"rows": rows}},
+        {"Shift Demo": {"reports": _report_payload(rows)}},
         dataframe_shift="both",
     )
     mo_dataport.export(

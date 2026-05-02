@@ -929,8 +929,8 @@ def _repeat_sheet_flowables(
                 bundle,
                 source_map,
                 record,
-                block_height=section["block_height"],
-                merges=section.get("merged_regions", []),
+                block_height=record.get("block_height", section["block_height"]),
+                merges=record.get("merged_regions", section.get("merged_regions", [])),
                 batch_size=streaming_chunk_rows,
             ):
                 if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:

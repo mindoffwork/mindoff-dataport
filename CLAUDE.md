@@ -67,7 +67,7 @@ Notes:
 - Preserve sheet gridline visibility via `show_gridlines`.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
-- Compile `dataframe_shift` controls normal-sheet template cell/merge movement around dataframe output: `"both"`, `"horizontal"`, `"vertical"`, or `"none"`; merges covering dataframe anchors still fail. Streaming still allows one `dataframe-content` placeholder per non-repeat sheet and no `hug`.
+- Compile `dataframe_shift` controls template cell/merge movement around dataframe output in both normal sheets and repeat records: `"both"`, `"horizontal"`, `"vertical"`, or `"none"`; merges covering dataframe anchors still fail. Streaming still allows one `dataframe-content` placeholder per non-repeat sheet and no `hug`.
 
 ## 5) Sizing
 

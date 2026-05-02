@@ -18,14 +18,35 @@ DATA_PARQUET = HERE / "data.parquet"
 OUTPUT_XLSX = HERE / "output.xlsx"
 
 
+def _report_payload(rows: pl.LazyFrame) -> list[dict]:
+    reports = [
+        {
+            "customer_name": "Alpha Team",
+            "region": "North",
+            "line_items": rows,
+            "note": "Shift right of dataframe",
+            "footer": "Shift below dataframe",
+        },
+        {
+            "customer_name": "Beta Team",
+            "region": "South",
+            "line_items": rows,
+            "note": "Repeat block stays aligned",
+            "footer": "Footer follows dataframe rows",
+        }
+    ]
+    return reports
+
+
 def main() -> None:
+    
     started = perf_counter()
 
     schema = mo_dataport.extract(str(TEMPLATE_XLSX))
     rows = pl.scan_parquet(DATA_PARQUET).select(["Employee", "Amount"])
     bundle = mo_dataport.compile(
         schema,
-        {"Shift Demo": {"rows": rows}},
+        {"Shift Demo": {"reports": _report_payload(rows)}},
         dataframe_shift="both",
     )
     with tempfile.TemporaryDirectory(prefix="mindoff_dataframe_shift_xlsx_") as tmp_dir:
