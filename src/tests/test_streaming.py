@@ -29,15 +29,34 @@ def _cell(coord: str, value):
             "bold": False,
             "italic": False,
             "underline": None,
+            "strike": False,
+            "vert_align": None,
             "color": None,
         },
-        "fill": {"bg_color": None},
-        "alignment": {"horizontal": None, "vertical": None, "wrap_text": False},
+        "fill": {"pattern_type": None, "fg_color": None, "bg_color": None},
+        "alignment": {
+            "horizontal": None,
+            "vertical": None,
+            "wrap_text": False,
+            "indent": None,
+            "relative_indent": None,
+            "text_rotation": None,
+            "shrink_to_fit": False,
+            "reading_order": None,
+        },
         "borders": {
             "top": {"style": None, "color": None},
             "bottom": {"style": None, "color": None},
             "left": {"style": None, "color": None},
             "right": {"style": None, "color": None},
+            "start": {"style": None, "color": None},
+            "end": {"style": None, "color": None},
+            "horizontal": {"style": None, "color": None},
+            "vertical": {"style": None, "color": None},
+            "diagonal": {"style": None, "color": None},
+            "diagonal_up": False,
+            "diagonal_down": False,
+            "outline": True,
         },
         "merged": False,
         "merge_anchor": None,
@@ -320,7 +339,7 @@ def test_streaming_preserves_static_merged_regions(managed_tmp_dir: Path):
     title = _cell("A1", "Merged Title")
     title["merged"] = True
     title["merge_anchor"] = "A1"
-    title["fill"] = {"bg_color": "FF00FF00"}
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FF00FF00", "bg_color": None}
     shadow = _cell("B1", "Should not be written")
     shadow["merged"] = True
     shadow["merge_anchor"] = "A1"
@@ -361,7 +380,7 @@ def test_streaming_rejects_merged_regions_that_intersect_content(managed_tmp_dir
 
 def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
     anchor = _cell("A1", "{{rows:dataframe-content}}")
-    anchor["fill"] = {"bg_color": "FFFF0000"}
+    anchor["fill"] = {"pattern_type": "solid", "fg_color": "FFFF0000", "bg_color": None}
     anchor["number_format"] = "0.00"
     schema = _schema({"A1": anchor}, dims="A1:A1")
     df = polars.DataFrame({"A": [1.5]})
@@ -377,7 +396,7 @@ def test_streaming_anchor_style_is_cloned(managed_tmp_dir: Path):
 
 def test_streaming_writes_dataframe_occupation_merges_and_alignment(managed_tmp_dir: Path):
     anchor = _cell("A1", "{{rows:dataframe-content}}")
-    anchor["fill"] = {"bg_color": "FFFFCC00"}
+    anchor["fill"] = {"pattern_type": "solid", "fg_color": "FFFFCC00", "bg_color": None}
     schema = _schema({"A1": anchor}, dims="A1:A1")
     bundle = mo_dataport.compile(
         schema,
@@ -434,6 +453,83 @@ def test_streaming_applies_occupation_merge_border_style_for_all_rows(
     assert ws["B1"].border.right.style == "thin"
     assert ws["B2"].border.right.style == "thin"
     wb.close()
+
+
+def test_streaming_occupation_merges_preserve_outline_without_interior_merge_borders(
+    managed_tmp_dir: Path,
+):
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thin", "color": "FF000000"},
+        "left": {"style": "thin", "color": "FF000000"},
+        "right": {"style": "thin", "color": "FF000000"},
+        "start": {"style": None, "color": None},
+        "end": {"style": None, "color": None},
+        "horizontal": {"style": "thin", "color": "FF000000"},
+        "vertical": {"style": "thin", "color": "FF000000"},
+        "diagonal": {"style": None, "color": None},
+        "diagonal_up": False,
+        "diagonal_down": False,
+        "outline": True,
+    }
+    schema = _schema({"A1": anchor}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Amount": [12, 34]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Amount": {"occupation": 2}}}}},
+    )
+
+    out = managed_tmp_dir / "occupied-outline-border.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert sorted(str(region) for region in ws.merged_cells.ranges) == ["A1:B1", "A2:B2"]
+    assert ws["A1"].border.left.style == "thin"
+    assert ws["B1"].border.right.style == "thin"
+    assert ws["A2"].border.left.style == "thin"
+    assert ws["B2"].border.right.style == "thin"
+    assert ws["A1"].border.vertical is None or ws["A1"].border.vertical.style is None
+    assert ws["A1"].border.horizontal is None or ws["A1"].border.horizontal.style is None
+    assert ws["A2"].border.vertical is None or ws["A2"].border.vertical.style is None
+    assert ws["A2"].border.horizontal is None or ws["A2"].border.horizontal.style is None
+    wb.close()
+
+
+def test_streaming_xlsx_omits_empty_optional_border_tags(managed_tmp_dir: Path):
+    anchor = _cell("A1", "{{rows:dataframe-content}}")
+    anchor["borders"] = {
+        "top": {"style": "thin", "color": "FF000000"},
+        "bottom": {"style": "thin", "color": "FF000000"},
+        "left": {"style": "thin", "color": "FF000000"},
+        "right": {"style": "thin", "color": "FF000000"},
+        "start": {"style": None, "color": None},
+        "end": {"style": None, "color": None},
+        "horizontal": {"style": None, "color": None},
+        "vertical": {"style": None, "color": None},
+        "diagonal": {"style": None, "color": None},
+        "diagonal_up": False,
+        "diagonal_down": False,
+        "outline": True,
+    }
+    schema = _schema({"A1": anchor}, dims="A1:A1")
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Amount": [12]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Amount": {"occupation": 2}}}}},
+    )
+
+    out = managed_tmp_dir / "occupied-border-tags.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    with ZipFile(paths[0]) as zf:
+        styles_xml = zf.read("xl/styles.xml").decode("utf-8")
+
+    assert "<start />" not in styles_xml
+    assert "<end />" not in styles_xml
+    assert "<horizontal />" not in styles_xml
+    assert "<vertical />" not in styles_xml
 
 
 def test_streaming_writes_header_occupation_merges(managed_tmp_dir: Path):
@@ -923,7 +1019,7 @@ def test_pdf_supports_static_merge_before_repeat_section(managed_tmp_dir: Path):
     title = _cell("A1", "Repeat Sample")
     title["merged"] = True
     title["merge_anchor"] = "A1"
-    title["fill"] = {"bg_color": "FF003366"}
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FF003366", "bg_color": None}
     shadow = _cell("B1", None)
     shadow["merged"] = True
     shadow["merge_anchor"] = "A1"

@@ -36,19 +36,34 @@ _DEFAULT_FONT: FontSchema = {
     "bold": False,
     "italic": False,
     "underline": None,
+    "strike": False,
+    "vert_align": None,
     "color": None,
 }
-_DEFAULT_FILL: FillSchema = {"bg_color": None}
+_DEFAULT_FILL: FillSchema = {"pattern_type": None, "fg_color": None, "bg_color": None}
 _DEFAULT_ALIGNMENT: AlignmentSchema = {
     "horizontal": None,
     "vertical": None,
     "wrap_text": False,
+    "indent": None,
+    "relative_indent": None,
+    "text_rotation": None,
+    "shrink_to_fit": False,
+    "reading_order": None,
 }
 _DEFAULT_BORDERS: CellBorders = {
     "top": _EMPTY_BORDER_SIDE,
     "bottom": _EMPTY_BORDER_SIDE,
     "left": _EMPTY_BORDER_SIDE,
     "right": _EMPTY_BORDER_SIDE,
+    "start": _EMPTY_BORDER_SIDE,
+    "end": _EMPTY_BORDER_SIDE,
+    "horizontal": _EMPTY_BORDER_SIDE,
+    "vertical": _EMPTY_BORDER_SIDE,
+    "diagonal": _EMPTY_BORDER_SIDE,
+    "diagonal_up": False,
+    "diagonal_down": False,
+    "outline": True,
 }
 
 # §2. Classes and Sub Classes

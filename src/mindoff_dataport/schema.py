@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Literal, Optional, TypedDict
 
@@ -31,6 +31,14 @@ class CellBorders(TypedDict):
     bottom: BorderSide
     left: BorderSide
     right: BorderSide
+    start: BorderSide      # LTR/RTL-aware: start of text direction (left in LTR)
+    end: BorderSide        # LTR/RTL-aware: end of text direction (right in LTR)
+    horizontal: BorderSide  # interior horizontal divider (used in merged ranges)
+    vertical: BorderSide    # interior vertical divider (used in merged ranges)
+    diagonal: BorderSide   # diagonal line style
+    diagonal_up: bool      # draw diagonal from bottom-left to top-right
+    diagonal_down: bool    # draw diagonal from top-left to bottom-right
+    outline: bool          # apply border as outline of selection
 
 
 class FontSchema(TypedDict):
@@ -39,17 +47,26 @@ class FontSchema(TypedDict):
     bold: bool
     italic: bool
     underline: Optional[str]  # None, "single", "double"
+    strike: bool              # strikethrough
+    vert_align: Optional[str]  # None, "superscript", "subscript", "baseline"
     color: Optional[str]  # ARGB hex string
 
 
 class FillSchema(TypedDict):
-    bg_color: Optional[str]  # ARGB hex string; None means no fill
+    pattern_type: Optional[str]  # "solid", "gray125", "darkGray", etc.; None = no fill
+    fg_color: Optional[str]      # foreground/pattern color (the visible color for solid fills)
+    bg_color: Optional[str]      # background color (used with patterned fills)
 
 
 class AlignmentSchema(TypedDict):
-    horizontal: Optional[str]  # "left", "center", "right", "fill", "justify", "general"
-    vertical: Optional[str]  # "top", "center", "bottom", "justify"
+    horizontal: Optional[str]        # "left", "center", "right", "fill", "justify", "general"
+    vertical: Optional[str]          # "top", "center", "bottom", "justify"
     wrap_text: bool
+    indent: Optional[int]            # indent level (1 unit ≈ 1 char width)
+    relative_indent: Optional[int]   # relative indent adjustment
+    text_rotation: Optional[int]     # degrees 0–180 (255 = vertical text)
+    shrink_to_fit: bool              # shrink font to fit cell width
+    reading_order: Optional[int]
 
 
 class CellSchema(TypedDict):

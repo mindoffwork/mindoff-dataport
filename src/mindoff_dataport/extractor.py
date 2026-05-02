@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 
@@ -30,18 +30,34 @@ _EMPTY_FONT: FontSchema = {
     "bold": False,
     "italic": False,
     "underline": None,
+    "strike": False,
+    "vert_align": None,
     "color": None,
 }
+_EMPTY_FILL: FillSchema = {"pattern_type": None, "fg_color": None, "bg_color": None}
 _EMPTY_ALIGNMENT: AlignmentSchema = {
     "horizontal": None,
     "vertical": None,
     "wrap_text": False,
+    "indent": None,
+    "relative_indent": None,
+    "text_rotation": None,
+    "shrink_to_fit": False,
+    "reading_order": None,
 }
 _EMPTY_BORDERS: CellBorders = {
     "top": _EMPTY_BORDER_SIDE,
     "bottom": _EMPTY_BORDER_SIDE,
     "left": _EMPTY_BORDER_SIDE,
     "right": _EMPTY_BORDER_SIDE,
+    "start": _EMPTY_BORDER_SIDE,
+    "end": _EMPTY_BORDER_SIDE,
+    "horizontal": _EMPTY_BORDER_SIDE,
+    "vertical": _EMPTY_BORDER_SIDE,
+    "diagonal": _EMPTY_BORDER_SIDE,
+    "diagonal_up": False,
+    "diagonal_down": False,
+    "outline": True,
 }
 
 # §2. Classes and Sub Classes
@@ -112,7 +128,7 @@ def _extract_cell(cell: Cell | MergedCell, merge_map: dict[str, str]) -> CellSch
             "cell_type": "empty",
             "number_format": None,
             "font": _EMPTY_FONT,
-            "fill": {"bg_color": None},
+            "fill": _EMPTY_FILL,
             "alignment": _EMPTY_ALIGNMENT,
             "borders": _EMPTY_BORDERS,
             "merged": True,
@@ -165,24 +181,39 @@ def _extract_font(cell: Cell) -> FontSchema:
         "bold": bool(f.bold),
         "italic": bool(f.italic),
         "underline": f.underline,
+        "strike": bool(f.strike),
+        "vert_align": f.vertAlign,
         "color": normalize_color(f.color),
     }
 
 
 def _extract_fill(cell: Cell) -> FillSchema:
     fill = cell.fill
-    fill_type = getattr(fill, "patternType", None) or getattr(fill, "fill_type", None)
-    if fill_type == "solid":
-        return {"bg_color": normalize_color(fill.fgColor)}
-    return {"bg_color": None}
+    pt = getattr(fill, "patternType", None) or getattr(fill, "fill_type", None)
+    if pt and pt != "none":
+        return {
+            "pattern_type": pt,
+            "fg_color": normalize_color(fill.fgColor) if hasattr(fill, "fgColor") else None,
+            "bg_color": normalize_color(fill.bgColor) if hasattr(fill, "bgColor") else None,
+        }
+    return {"pattern_type": None, "fg_color": None, "bg_color": None}
 
 
 def _extract_alignment(cell: Cell) -> AlignmentSchema:
     a = cell.alignment
+    indent = a.indent
+    rel = a.relativeIndent
+    rot = a.textRotation
+    order = a.readingOrder
     return {
         "horizontal": a.horizontal,
         "vertical": a.vertical,
         "wrap_text": bool(a.wrap_text),
+        "indent": int(indent) if indent else None,
+        "relative_indent": int(rel) if rel else None,
+        "text_rotation": int(rot) if rot else None,
+        "shrink_to_fit": bool(a.shrink_to_fit),
+        "reading_order": int(order) if order else None,
     }
 
 
@@ -193,6 +224,14 @@ def _extract_borders(cell: Cell) -> CellBorders:
         "bottom": border_side_to_dict(b.bottom),
         "left": border_side_to_dict(b.left),
         "right": border_side_to_dict(b.right),
+        "start": border_side_to_dict(b.start),
+        "end": border_side_to_dict(b.end),
+        "horizontal": border_side_to_dict(b.horizontal),
+        "vertical": border_side_to_dict(b.vertical),
+        "diagonal": border_side_to_dict(b.diagonal),
+        "diagonal_up": bool(getattr(b, "diagonalUp", False)),
+        "diagonal_down": bool(getattr(b, "diagonalDown", False)),
+        "outline": bool(getattr(b, "outline", True)),
     }
 
 
@@ -203,7 +242,7 @@ def _apply_merged_region_borders(
         anchor = cells.get(merged_range.coord.split(":")[0])
         if anchor is None:
             continue
-        borders = {side: dict(value) for side, value in anchor["borders"].items()}
+        borders = dict(anchor["borders"])
         edges = {
             "top": _merged_edge_side(ws, merged_range.min_row, merged_range, "top"),
             "bottom": _merged_edge_side(
