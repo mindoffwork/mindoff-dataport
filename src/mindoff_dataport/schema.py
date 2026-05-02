@@ -97,6 +97,8 @@ class SheetSchema(_SheetSchemaRequired, total=False):
     default_column_width: float  # width applied to every column in "even" mode
     row_height_mode: Literal["fixed", "even", "hug"]
     default_row_height: float  # height applied to every row in "even" mode
+    row_page_breaks: list[int]
+    column_page_breaks: list[int]
     show_gridlines: bool
     repeat_sections: list[dict]
 

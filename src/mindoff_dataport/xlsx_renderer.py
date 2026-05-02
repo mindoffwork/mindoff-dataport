@@ -29,6 +29,7 @@ from .xlsx_builder import (
     _build_font,
 )
 from .bundle import ReportBundle, load_report_bundle
+from .page_breaks import apply_manual_breaks
 from .template_contract import _infer_cell_type, _parse_dims
 from .schema import CellSchema, SheetSchema
 
@@ -253,6 +254,14 @@ def _render_fidelity(
             _apply_fixed_dataframe_row_heights_fidelity(ws, sheet, source_map)
         if sheet.get("row_height_mode", "fixed") == "hug":
             _apply_hug_rows(ws, _dimensioned_sheet(sheet, max_col, max_row))
+        apply_manual_breaks(
+            ws,
+            row_breaks=sheet.get("resolved_row_page_breaks", sheet.get("row_page_breaks")),
+            column_breaks=sheet.get(
+                "resolved_column_page_breaks",
+                sheet.get("column_page_breaks"),
+            ),
+        )
 
     wb.save(output_path)
 
@@ -606,19 +615,32 @@ def _repeat_row_stream(
 ) -> Iterator[dict[str, Any]]:
     _, min_row, _, max_row = _parse_dims(sheet["dimensions"])
     cursor = min_row
+    output_row = 1
     for section in sheet["repeat_sections"]:
-        yield from _static_repeat_rows(sheet, cursor, section["start_row"] - 1)
+        for row_item in _static_repeat_rows(sheet, cursor, section["start_row"] - 1):
+            item = dict(row_item)
+            item["row_idx"] = output_row
+            yield item
+            output_row += 1
         for record in section["records"]:
-            yield from _repeat_record_rows(
+            for row_item in _repeat_record_rows(
                 bundle,
                 source_map,
                 record,
                 block_height=record.get("block_height", section["block_height"]),
                 merges=record.get("merged_regions", section.get("merged_regions", [])),
                 batch_size=streaming_chunk_rows,
-            )
+            ):
+                item = dict(row_item)
+                item["row_idx"] = output_row
+                yield item
+                output_row += 1
         cursor = section["end_row"] + 1
-    yield from _static_repeat_rows(sheet, cursor, max_row)
+    for row_item in _static_repeat_rows(sheet, cursor, max_row):
+        item = dict(row_item)
+        item["row_idx"] = output_row
+        yield item
+        output_row += 1
 
 
 def _static_repeat_rows(
@@ -814,6 +836,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
         max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
     col_count = max_col - plan["min_col"] + 1
     wrote_content = False
+    written_rows = 0
 
     for row_idx in range(plan["min_row"], max(plan["max_row"], plan["min_row"]) + 1):
         if row_idx > max_rows_per_workbook:
@@ -830,6 +853,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
                 ws, row_cells, plan, anchor, content, row_idx
             ) or wrote_content
         ws.append(row_cells)
+        written_rows += 1
 
     if anchor is not None:
         row_idx = max(plan["max_row"] + 1, anchor["start_row"])
@@ -841,7 +865,23 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
             if content["exhausted"]:
                 break
             ws.append(row_cells)
+            written_rows += 1
             row_idx += 1
+    apply_manual_breaks(
+        ws,
+        row_breaks=[
+            break_idx
+            for break_idx in plan["sheet"].get(
+                "resolved_row_page_breaks",
+                plan["sheet"].get("row_page_breaks", []),
+            )
+            if break_idx < written_rows
+        ],
+        column_breaks=plan["sheet"].get(
+            "resolved_column_page_breaks",
+            plan["sheet"].get("column_page_breaks"),
+        ),
+    )
     return wrote_content
 
 
@@ -852,6 +892,7 @@ def _write_repeat_streaming_sheet(
     col_count = max_col - plan["min_col"] + 1
     wrote_any = False
     row_idx = 1
+    written_rows = 0
     while row_idx <= max_rows_per_workbook:
         try:
             row_item = next(plan["repeat_rows"])
@@ -877,7 +918,23 @@ def _write_repeat_streaming_sheet(
             row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, schema)
         ws.append(row_cells)
         wrote_any = True
+        written_rows += 1
         row_idx += 1
+    apply_manual_breaks(
+        ws,
+        row_breaks=[
+            break_idx
+            for break_idx in plan["sheet"].get(
+                "resolved_row_page_breaks",
+                plan["sheet"].get("row_page_breaks", []),
+            )
+            if break_idx < written_rows
+        ],
+        column_breaks=plan["sheet"].get(
+            "resolved_column_page_breaks",
+            plan["sheet"].get("column_page_breaks"),
+        ),
+    )
     return wrote_any
 
 

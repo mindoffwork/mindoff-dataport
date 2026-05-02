@@ -26,7 +26,7 @@ Rules:
 - Project: `mindoff_dataport`
 - Import package: `mindoff_dataport`
 - Flow: `extract_template(.xlsx) -> schema -> compile_report_bundle(...) -> export_report_bundle(...)`
-- Main modules: `schema.py`, `extractor.py`, `template_contract.py`, `bundle.py`, `xlsx_renderer.py`, `pdf_renderer.py`, `xlsx_builder.py`, `style_conversion.py`
+- Main modules: `schema.py`, `extractor.py`, `template_contract.py`, `bundle.py`, `page_breaks.py`, `xlsx_renderer.py`, `pdf_renderer.py`, `xlsx_builder.py`, `style_conversion.py`
 
 ## 3) Public API
 
@@ -46,6 +46,8 @@ Notes:
 - Polars `LazyFrame` is the disk-backed input for larger-than-RAM data; use `pl.scan_parquet(...)` for Parquet inputs.
 - `format="xlsx"` and `format="pdf"` are implemented. `format="image"` raises `NotImplementedError`.
 - PDF export uses ReportLab, starts each sheet on a new page, and paginates overflow rows vertically.
+- Extracted sheet schemas may include `row_page_breaks` / `column_page_breaks` from manual Excel print breaks; compile resolves them against shifted dataframe layout before export.
+- PDF uses resolved `row_page_breaks` as manual page boundaries and ignores `column_page_breaks`; XLSX preserves both resolved row and column breaks.
 - PDF export supports optional custom TrueType/OpenType fonts via the `fonts` option.
 - PDF export draws only template borders; it must not add a default grid over empty spacer cells.
 - PDF renders `strike` and `vert_align` (superscript/subscript) via ReportLab paragraph markup; `indent`/`relative_indent` via cell padding; `justify`/`distributed` alignment via `TA_JUSTIFY`; pattern fills approximated by background color. `text_rotation` and diagonal borders are captured in schema but not rendered in PDF.

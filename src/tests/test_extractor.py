@@ -3,6 +3,7 @@ import json
 import openpyxl
 import pytest
 from openpyxl.styles import Border, Side
+from openpyxl.worksheet.pagebreak import Break
 from openpyxl.utils.cell import get_column_letter
 
 from mindoff_dataport import extract_template
@@ -225,6 +226,41 @@ def test_row_heights_captured(workbook_schema):
     heights = workbook_schema["sheets"][0]["row_heights"]
     assert "1" in heights
     assert abs(heights["1"] - 30.0) < 0.5
+
+
+def test_manual_row_and_column_page_breaks_are_extracted(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "Breaks"
+    sheet.row_breaks.append(Break(id=2))
+    sheet.col_breaks.append(Break(id=3))
+    path = managed_tmp_dir / "page-breaks.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    assert schema["sheets"][0]["row_page_breaks"] == [2]
+    assert schema["sheets"][0]["column_page_breaks"] == [3]
+
+
+def test_manual_page_breaks_are_normalized(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "Breaks"
+    sheet.row_breaks.append(Break(id=5))
+    sheet.row_breaks.append(Break(id=2))
+    sheet.row_breaks.append(Break(id=5))
+    sheet.row_breaks.append(Break(id=0))
+    sheet.col_breaks.append(Break(id=4))
+    sheet.col_breaks.append(Break(id=2))
+    sheet.col_breaks.append(Break(id=4))
+    path = managed_tmp_dir / "normalized-breaks.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    assert schema["sheets"][0]["row_page_breaks"] == [2, 5]
+    assert schema["sheets"][0]["column_page_breaks"] == [2, 4]
 
 
 def test_schema_is_json_serializable(workbook_schema):
