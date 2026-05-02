@@ -70,6 +70,7 @@ Notes:
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.
 - Compile `dataframe_shift` controls template cell/merge movement around dataframe output in both normal sheets and repeat records: `"both"`, `"horizontal"`, `"vertical"`, or `"none"`; merges covering dataframe anchors still fail. Streaming still allows one `dataframe-content` placeholder per non-repeat sheet and no `hug`.
+- Streaming repeat-sheet rendering must consume dataframe-content-covered row offsets exactly once; it must not emit extra blank rows after repeated dataframe output.
 
 ## 5) Sizing
 

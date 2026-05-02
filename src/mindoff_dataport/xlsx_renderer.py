@@ -682,7 +682,8 @@ def _repeat_record_rows(
         )
         target.setdefault(anchor["start_row_offset"], []).append(anchor)
 
-    for offset in range(block_height):
+    offset = 0
+    while offset < block_height:
         row_cells = dict(cells_by_offset.get(offset, {}))
         header_merges: list[dict[str, Any]] = []
         for anchor in headers_by_offset.get(offset, []):
@@ -698,6 +699,7 @@ def _repeat_record_rows(
                 "merges": _repeat_merges_starting_at(merges or [], offset)
                 + header_merges,
             }
+            offset += 1
             continue
         yield from _repeat_content_rows(
             bundle,
@@ -707,6 +709,8 @@ def _repeat_record_rows(
             base_merges=header_merges,
             batch_size=batch_size,
         )
+        anchor = content_anchors[0]
+        offset += max(int(anchor.get("source_rows") or 0), 1)
 
 
 def _apply_repeat_merge_edge_cells(

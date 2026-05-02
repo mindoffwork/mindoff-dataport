@@ -792,6 +792,46 @@ def test_streaming_repeat_dataframe_occupation_merges(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_streaming_repeat_dataframe_content_preserves_single_template_gap(
+    managed_tmp_dir: Path,
+):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+            "A4": _cell("A4", "After"),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A5",
+    )
+    schema["sheets"][0]["cells"]["A3"] = _cell("A3", None)
+
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {"rows": polars.DataFrame({"A": [1, 2, 3, 4]})},
+                ]
+            }
+        },
+        dataframe_shift="vertical",
+    )
+
+    out = managed_tmp_dir / "repeat-gap.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert ws["A1"].value == 1
+    assert ws["A2"].value == 2
+    assert ws["A3"].value == 3
+    assert ws["A4"].value == 4
+    assert ws["A5"].value is None
+    assert ws["A6"].value == "After"
+    wb.close()
+
+
 def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
     managed_tmp_dir: Path,
 ):
@@ -846,7 +886,7 @@ def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
         ws["A3"].value,
         ws["A4"].value,
         ws["A5"].value,
-        ws["A7"].value,
+        ws["A6"].value,
     ] == [
         "Customer: Acme",
         "North",
@@ -857,12 +897,12 @@ def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
     ]
     assert [
         ws["D3"].value,
+        ws["A7"].value,
         ws["A8"].value,
         ws["A9"].value,
         ws["A10"].value,
         ws["A11"].value,
-        ws["A12"].value,
-        ws["D10"].value,
+        ws["D9"].value,
     ] == [
         "Side 1",
         "Customer: Globex",
@@ -874,10 +914,10 @@ def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
     ]
     assert sorted(str(region) for region in ws.merged_cells.ranges) == [
         "A10:B10",
-        "A11:B11",
         "A3:B3",
         "A4:B4",
         "A5:B5",
+        "A9:B9",
     ]
     wb.close()
 
