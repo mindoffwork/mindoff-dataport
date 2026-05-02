@@ -28,6 +28,7 @@ from .template_contract import (
     _to_headers,
     get_template_inputs,
 )
+from .page_breaks import resolve_compiled_sheet_page_breaks
 from .schema import CellSchema, SheetSchema, WorkbookSchema
 
 __all__ = [
@@ -312,6 +313,7 @@ def _compile_sheet(
     result["dataframe_anchors"] = anchors
     _shift_template_content_around_dataframes(result, dataframe_shift=dataframe_shift)
     _validate_template_merges_do_not_overlap_dataframes(result)
+    resolve_compiled_sheet_page_breaks(result)
     return result
 
 
@@ -378,6 +380,7 @@ def _compile_repeat_sheet(
     result["cells"] = static_cells
     result["dataframe_anchors"] = []
     result["repeat_sections"] = repeat_sections
+    resolve_compiled_sheet_page_breaks(result)
     return result
 
 

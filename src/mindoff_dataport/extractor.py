@@ -18,6 +18,7 @@ from .schema import (
     SheetSchema,
     WorkbookSchema,
 )
+from .page_breaks import extract_manual_breaks
 from .style_conversion import border_side_to_dict, normalize_color
 
 # §1. Constants & Exceptions
@@ -82,7 +83,7 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
         if ws.row_dimensions[row_idx].height is not None
     }
 
-    return {
+    result: SheetSchema = {
         "name": ws.title,
         "dimensions": ws.dimensions,
         "merged_regions": merged_regions,
@@ -91,6 +92,13 @@ def _extract_sheet(ws: Worksheet) -> SheetSchema:
         "show_gridlines": bool(ws.sheet_view.showGridLines),
         "cells": cells,
     }
+    row_page_breaks = extract_manual_breaks(ws.row_breaks)
+    column_page_breaks = extract_manual_breaks(ws.col_breaks)
+    if row_page_breaks:
+        result["row_page_breaks"] = row_page_breaks
+    if column_page_breaks:
+        result["column_page_breaks"] = column_page_breaks
+    return result
 
 
 def _build_merge_map(ws: Worksheet) -> dict[str, str]:

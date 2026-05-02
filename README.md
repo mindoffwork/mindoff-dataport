@@ -157,7 +157,7 @@ from mindoff_dataport import (
 
 ### `extract(path)` — `extract_template(path)`
 
-Reads an `.xlsx` file and returns a `WorkbookSchema` containing cell styles, dimensions, merged regions, and discovered placeholder types.
+Reads an `.xlsx` file and returns a `WorkbookSchema` containing cell styles, dimensions, merged regions, manual print breaks, and discovered placeholder types.
 
 | Parameter | Type  | Required | Description                          |
 |-----------|-------|----------|--------------------------------------|
@@ -258,6 +258,19 @@ The placeholder cell is replaced in-place with the supplied value, inheriting al
 The anchor cell inherits its style (font, fill, border, alignment) and applies it to all generated cells. Column names become header text.
 
 **Streaming note:** `dataframe-content` placeholders support streaming from Parquet. Only one `dataframe-content` placeholder is allowed per non-repeat sheet in streaming mode.
+
+### Manual Page Breaks
+
+Templates may also contain manual Excel print breaks.
+
+- `row_page_breaks`: 1-based template row indexes after which a new printed page begins
+- `column_page_breaks`: 1-based template column indexes after which Excel starts a new printed page
+
+These are extracted from Excel's manual print-break metadata, not placeholder syntax.
+
+- During `compile()`, breaks are resolved against the rendered layout after dataframe expansion and `dataframe_shift`
+- PDF uses resolved row breaks only, inserting a new PDF page before later rows
+- XLSX preserves both resolved row and column breaks in fidelity and streaming exports
 
 #### Repeat Types
 
@@ -423,6 +436,16 @@ bundle = mo_dataport.compile(
 The shift is metadata-only: dataframe rows remain in Parquet, `report.json` stores compact anchors, and streaming export still reads rows in batches. The same shifted bundle layout is used by XLSX and PDF. Repeat sections keep their stricter merge rules.
 
 See `examples/dataframe_shift/xlsx.py` and `examples/dataframe_shift/pdf.py`.
+
+### Manual Page Breaks
+
+Excel manual print breaks from the template are extracted into schema metadata and resolved again after compile-time dataframe expansion.
+
+- `row_page_breaks` start a new printed page after the given 1-based template row
+- `column_page_breaks` start a new printed page after the given 1-based template column in XLSX output
+- PDF uses resolved row breaks as manual page boundaries and ignores column breaks
+
+See `examples/page_break/xlsx.py` and `examples/page_break/pdf.py`.
 
 ### XLSX Options
 

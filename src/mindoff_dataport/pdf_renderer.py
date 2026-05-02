@@ -29,6 +29,7 @@ from .xlsx_renderer import (
     _header_cells,
     _layout_alignment,
     _occupied_width,
+    _repeat_row_stream,
     _repeat_record_rows,
     _source_rows,
     _static_row_merges,
@@ -914,6 +915,74 @@ def _chunked_row_tables(
         )
 
 
+def _resolved_row_page_breaks(sheet: SheetSchema) -> set[int]:
+    return {
+        int(break_idx)
+        for break_idx in sheet.get(
+            "resolved_row_page_breaks",
+            sheet.get("row_page_breaks", []),
+        )
+    }
+
+
+def _chunked_row_flowables(
+    sheet: SheetSchema,
+    row_items: Iterator[dict[str, Any]],
+    min_col: int,
+    max_col: int,
+    available_width: float,
+    font_resolver: _FontResolver,
+    *,
+    streaming_chunk_rows: int,
+    page_breaks: set[int] | None = None,
+    chunk_row_height: float | None = None,
+) -> Iterator[Any]:
+    chunk: list[dict[str, Any]] = []
+    previous_row_idx: int | None = None
+    manual_breaks = page_breaks or set()
+    for row_item in row_items:
+        row_idx = int(row_item.get("row_idx", 0) or 0)
+        if chunk and previous_row_idx in manual_breaks:
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
+            )
+            yield PageBreak()
+            chunk = []
+        if (
+            chunk
+            and _chunk_merges_fit(chunk)
+            and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows
+        ):
+            yield _row_chunk_table(
+                sheet,
+                chunk,
+                min_col,
+                max_col,
+                available_width,
+                font_resolver,
+                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
+            )
+            chunk = []
+        chunk.append(row_item)
+        previous_row_idx = row_idx
+    if chunk:
+        yield _row_chunk_table(
+            sheet,
+            chunk,
+            min_col,
+            max_col,
+            available_width,
+            font_resolver,
+            per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
+        )
+
+
 def _dataframe_sheet_flowables(
     bundle: ReportBundle,
     raw_sheet: dict[str, Any],
@@ -941,7 +1010,7 @@ def _dataframe_sheet_flowables(
     sheet = _expanded_sheet_from_manifest(sheet, source_map)
     min_col, _, max_col, _ = _parse_dims(sheet["dimensions"])
     chunk_row_height = _content_anchor_row_height(sheet)
-    yield from _chunked_row_tables(
+    yield from _chunked_row_flowables(
         sheet,
         _dataframe_pdf_rows(
             bundle,
@@ -954,6 +1023,7 @@ def _dataframe_sheet_flowables(
         available_width,
         font_resolver,
         streaming_chunk_rows=streaming_chunk_rows,
+        page_breaks=_resolved_row_page_breaks(sheet),
         chunk_row_height=chunk_row_height,
     )
 
@@ -978,99 +1048,57 @@ def _repeat_sheet_flowables(
         default_row_height=default_row_height,
     )
     source_map = _data_source_map(bundle)
-    min_col, min_row, max_col, _ = _parse_dims(sheet["dimensions"])
+    min_col, _, max_col, _ = _parse_dims(sheet["dimensions"])
     max_col = _repeat_max_col(sheet, max_col)
-    chunk: list[dict[str, Any]] = []
-    cursor = min_row
-
-    for section in sheet["repeat_sections"]:
-        for row_item in _static_pdf_rows(sheet, cursor, section["start_row"] - 1):
-            if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
-                yield _row_chunk_table(
-                    sheet,
-                    chunk,
-                    min_col,
-                    max_col,
-                    available_width,
-                    font_resolver,
-                )
-                chunk = []
-            chunk.append(row_item)
-            if len(chunk) >= streaming_chunk_rows:
-                yield _row_chunk_table(
-                    sheet,
-                    chunk,
-                    min_col,
-                    max_col,
-                    available_width,
-                    font_resolver,
-                )
-                chunk = []
-        for record in section["records"]:
-            for row_item in _repeat_record_rows(
-                bundle,
-                source_map,
-                record,
-                block_height=record.get("block_height", section["block_height"]),
-                merges=record.get("merged_regions", section.get("merged_regions", [])),
-                batch_size=streaming_chunk_rows,
-            ):
-                if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
-                    yield _row_chunk_table(
-                        sheet,
-                        chunk,
-                        min_col,
-                        max_col,
-                        available_width,
-                        font_resolver,
-                    )
-                    chunk = []
-                chunk.append(row_item)
-                if len(chunk) >= streaming_chunk_rows:
-                    yield _row_chunk_table(
-                        sheet,
-                        chunk,
-                        min_col,
-                        max_col,
-                        available_width,
-                        font_resolver,
-                    )
-                    chunk = []
-        cursor = section["end_row"] + 1
-
-    _, _, _, max_row = _parse_dims(sheet["dimensions"])
-    for row_item in _static_pdf_rows(sheet, cursor, max_row):
-        if chunk and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows:
-            yield _row_chunk_table(
-                sheet,
-                chunk,
-                min_col,
-                max_col,
-                available_width,
-                font_resolver,
-            )
-            chunk = []
-        chunk.append(row_item)
-        if len(chunk) >= streaming_chunk_rows:
-            yield _row_chunk_table(
-                sheet,
-                chunk,
-                min_col,
-                max_col,
-                available_width,
-                font_resolver,
-            )
-            chunk = []
-
-    if chunk:
-        yield _row_chunk_table(
+    yield from _chunked_row_flowables(
+        sheet,
+        _repeat_row_stream(
+            bundle,
+            source_map,
             sheet,
-            chunk,
-            min_col,
-            max_col,
-            available_width,
-            font_resolver,
-        )
+            streaming_chunk_rows=streaming_chunk_rows,
+        ),
+        min_col,
+        max_col,
+        available_width,
+        font_resolver,
+        streaming_chunk_rows=streaming_chunk_rows,
+        page_breaks=_resolved_row_page_breaks(sheet),
+    )
+
+
+def _static_sheet_flowables(
+    bundle: ReportBundle,
+    raw_sheet: dict[str, Any],
+    *,
+    available_width: float,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    streaming_chunk_rows: int,
+    font_resolver: _FontResolver,
+) -> Iterator[Any]:
+    del bundle
+    sheet = _sheet_with_overrides(
+        raw_sheet,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+    )
+    min_col, min_row, max_col, max_row = _parse_dims(sheet["dimensions"])
+    segment_rows = max(max_row - min_row + 1, 1)
+    yield from _chunked_row_flowables(
+        sheet,
+        _static_pdf_rows(sheet, min_row, max_row),
+        min_col,
+        max_col,
+        available_width,
+        font_resolver,
+        streaming_chunk_rows=max(segment_rows, streaming_chunk_rows),
+        page_breaks=_resolved_row_page_breaks(sheet),
+    )
 
 
 def _sheet_flowables(
@@ -1111,7 +1139,7 @@ def _sheet_flowables(
             font_resolver=font_resolver,
         )
         return
-    yield _sheet_table(
+    yield from _static_sheet_flowables(
         bundle,
         raw_sheet,
         available_width=available_width,

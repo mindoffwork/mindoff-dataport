@@ -7,6 +7,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 import reportlab
+from reportlab.platypus import PageBreak
 
 from mindoff_dataport import mo_dataport
 from mindoff_dataport.bundle import load_report_bundle
@@ -14,14 +15,15 @@ from mindoff_dataport.pdf_renderer import (
     _FontResolver,
     _LazyFlowables,
     _apply_tint,
+    _chunked_row_tables,
     _column_widths,
     _data_source_map,
     _dataframe_pdf_rows,
-    _chunked_row_tables,
     _hex_color,
     _paragraph,
     _repeat_record_rows,
     _row_chunk_table,
+    _sheet_flowables,
     _table_style,
 )
 from mindoff_dataport.xlsx_renderer import _expanded_cells
@@ -627,6 +629,64 @@ def test_compile_scopes_dataframe_column_layouts_by_placeholder_key():
     assert header["column_layouts"][0]["alignment"] == "center"
     assert content["column_layouts"][0]["occupation"] == 3
     assert content["column_layouts"][0]["alignment"] == "right"
+
+
+def test_compile_resolves_dynamic_row_page_breaks_after_dataframe_content():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+            "A2": _cell("A2", "Footer"),
+        },
+        dims="A1:A2",
+    )
+    schema["sheets"][0]["row_page_breaks"] = [1]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+        dataframe_shift="vertical",
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["row_page_breaks"] == [1]
+    assert sheet["resolved_row_page_breaks"] == [3]
+
+
+def test_compile_resolves_dynamic_column_page_breaks_after_dataframe_expansion():
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:C1")
+    schema["sheets"][0]["column_page_breaks"] = [1]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1], "B": [2]})}},
+        dataframe_shift="horizontal",
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["column_page_breaks"] == [1]
+    assert sheet["resolved_column_page_breaks"] == [2]
+
+
+def test_compile_resolves_repeat_row_page_breaks_against_rendered_records():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+            "A4": _cell("A4", "After"),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A5",
+    )
+    schema["sheets"][0]["row_page_breaks"] = [2]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"reports": [{"rows": polars.DataFrame({"A": [1, 2, 3]})}]}},
+        dataframe_shift="vertical",
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["resolved_row_page_breaks"] == [3]
 
 
 def test_compile_shifts_right_side_merge_away_from_dataframe_occupied_range(
@@ -1390,6 +1450,22 @@ def test_fidelity_inherits_anchor_row_height_for_dataframe_rows(managed_tmp_dir:
     wb.close()
 
 
+def test_fidelity_export_writes_resolved_page_breaks(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "Title")}, dims="A1:B2")
+    schema["sheets"][0]["row_page_breaks"] = [1]
+    schema["sheets"][0]["column_page_breaks"] = [1]
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+    out = managed_tmp_dir / "page-breaks.xlsx"
+
+    mo_dataport.export(bundle, str(out), export_mode="fidelity")
+
+    wb = openpyxl.load_workbook(out)
+    ws = wb["Sheet1"]
+    assert [item.id for item in ws.row_breaks.brk] == [1]
+    assert [item.id for item in ws.col_breaks.brk] == [1]
+    wb.close()
+
+
 def test_pdf_export_handles_merges_and_basic_styles(managed_tmp_dir: Path):
     title = _cell("A1", "Merged Title")
     title["merged"] = True
@@ -1411,6 +1487,122 @@ def test_pdf_export_handles_merges_and_basic_styles(managed_tmp_dir: Path):
 
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_pdf_sheet_flowables_insert_manual_page_break_for_static_rows():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "Top"),
+            "A2": _cell("A2", "Bottom"),
+        },
+        dims="A1:A2",
+    )
+    schema["sheets"][0]["row_page_breaks"] = [1]
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=10,
+            font_resolver=_FontResolver(),
+        )
+    )
+
+    assert any(isinstance(item, PageBreak) for item in flowables)
+
+
+def test_pdf_sheet_flowables_insert_manual_page_break_for_streamed_dataframe_rows():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+            "A2": _cell("A2", "After"),
+        },
+        dims="A1:A2",
+    )
+    schema["sheets"][0]["row_page_breaks"] = [1]
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+        dataframe_shift="vertical",
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+        )
+    )
+
+    assert any(isinstance(item, PageBreak) for item in flowables)
+
+
+def test_pdf_sheet_flowables_insert_manual_page_break_for_repeat_rows():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+            "A4": _cell("A4", "After"),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A5",
+    )
+    schema["sheets"][0]["row_page_breaks"] = [2]
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"reports": [{"rows": polars.DataFrame({"A": [1, 2, 3]})}]}},
+        dataframe_shift="vertical",
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+        )
+    )
+
+    assert any(isinstance(item, PageBreak) for item in flowables)
+
+
+def test_pdf_column_page_breaks_do_not_change_flow():
+    schema = _schema({"A1": _cell("A1", "Only")}, dims="A1:A1")
+    schema["sheets"][0]["column_page_breaks"] = [1]
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=10,
+            font_resolver=_FontResolver(),
+        )
+    )
+
+    assert not any(isinstance(item, PageBreak) for item in flowables)
 
 
 def test_pdf_table_style_applies_merged_region_border_to_span():

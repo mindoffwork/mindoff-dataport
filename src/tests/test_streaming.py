@@ -318,6 +318,20 @@ def test_streaming_applies_fixed_and_even_dimensions(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_streaming_writes_resolved_page_breaks(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "Title")}, dims="A1:B2")
+    schema["sheets"][0]["row_page_breaks"] = [1]
+    schema["sheets"][0]["column_page_breaks"] = [1]
+
+    paths = _export_streaming(schema, {"Sheet1": {}}, managed_tmp_dir)
+
+    wb = openpyxl.load_workbook(paths[0])
+    ws = wb["Sheet1"]
+    assert [item.id for item in ws.row_breaks.brk] == [1]
+    assert [item.id for item in ws.col_breaks.brk] == [1]
+    wb.close()
+
+
 def test_streaming_inherits_anchor_row_height_for_dataframe_rows(managed_tmp_dir: Path):
     schema = _schema({"A2": _cell("A2", "{{rows:dataframe-content}}")}, dims="A1:B2")
     schema["sheets"][0]["row_heights"] = {"2": 24.0}
