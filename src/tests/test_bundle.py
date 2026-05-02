@@ -47,15 +47,34 @@ def _cell(coord: str, value):
             "bold": False,
             "italic": False,
             "underline": None,
+            "strike": False,
+            "vert_align": None,
             "color": None,
         },
-        "fill": {"bg_color": None},
-        "alignment": {"horizontal": None, "vertical": None, "wrap_text": False},
+        "fill": {"pattern_type": None, "fg_color": None, "bg_color": None},
+        "alignment": {
+            "horizontal": None,
+            "vertical": None,
+            "wrap_text": False,
+            "indent": None,
+            "relative_indent": None,
+            "text_rotation": None,
+            "shrink_to_fit": False,
+            "reading_order": None,
+        },
         "borders": {
             "top": {"style": None, "color": None},
             "bottom": {"style": None, "color": None},
             "left": {"style": None, "color": None},
             "right": {"style": None, "color": None},
+            "start": {"style": None, "color": None},
+            "end": {"style": None, "color": None},
+            "horizontal": {"style": None, "color": None},
+            "vertical": {"style": None, "color": None},
+            "diagonal": {"style": None, "color": None},
+            "diagonal_up": False,
+            "diagonal_down": False,
+            "outline": True,
         },
         "merged": False,
         "merge_anchor": None,
@@ -1198,13 +1217,13 @@ def test_pdf_dataframe_rows_emit_occupation_spans_and_alignment():
 
 def test_pdf_table_uses_shared_expanded_xlsx_render_plan_for_dataframe_styles():
     header = _cell("A1", "{{headers:dataframe-header}}")
-    header["fill"] = {"bg_color": "FF1F4E79"}
+    header["fill"] = {"pattern_type": "solid", "fg_color": "FF1F4E79", "bg_color": None}
     header["font"] = dict(header["font"])
     header["font"]["color"] = "FFFFFFFF"
     header["alignment"] = dict(header["alignment"])
     header["alignment"]["vertical"] = "center"
     content = _cell("A2", "{{rows:dataframe-content}}")
-    content["fill"] = {"bg_color": "FFD9EAF7"}
+    content["fill"] = {"pattern_type": "solid", "fg_color": "FFD9EAF7", "bg_color": None}
     content["font"] = dict(content["font"])
     content["font"]["color"] = "FF203040"
     content["borders"] = {
@@ -1377,7 +1396,7 @@ def test_pdf_export_handles_merges_and_basic_styles(managed_tmp_dir: Path):
     title["merge_anchor"] = "A1"
     title["font"] = dict(title["font"])
     title["font"]["bold"] = True
-    title["fill"] = {"bg_color": "FF003366"}
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FF003366", "bg_color": None}
     title["alignment"] = dict(title["alignment"])
     title["alignment"]["horizontal"] = "center"
     shadow = _cell("B1", "")
@@ -1421,7 +1440,7 @@ def test_pdf_table_style_applies_merged_region_fill_to_span():
     title = _cell("A1", "Merged Title")
     title["merged"] = True
     title["merge_anchor"] = "A1"
-    title["fill"] = {"bg_color": "FF003366"}
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FF003366", "bg_color": None}
     sheet = _schema({"A1": title}, dims="A1:D1")["sheets"][0]
     sheet["merged_regions"] = ["A1:D1"]
 

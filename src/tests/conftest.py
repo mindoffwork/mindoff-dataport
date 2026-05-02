@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -70,6 +70,7 @@ def _create_fixture() -> None:
     ws = wb.active
     ws.title = "Sheet1"
 
+    # §3.1 Base cells (rows 1–5) — original fixture content
     ws.merge_cells("A1:C2")
     cell = ws["A1"]
     cell.value = "Merged Header"
@@ -118,6 +119,54 @@ def _create_fixture() -> None:
     ws.row_dimensions[2].height = 30.0
     ws.row_dimensions[5].height = 50.0
 
+    # §3.2 Extended style cells (rows 6–9) — new style fields
+
+    # Font: strike, vert_align
+    ws["A6"].value = "Strikethrough"
+    ws["A6"].font = Font(strike=True, size=11)
+
+    ws["B6"].value = "Super2"
+    ws["B6"].font = Font(vertAlign="superscript", size=11)
+
+    ws["C6"].value = "Sub2"
+    ws["C6"].font = Font(vertAlign="subscript", size=11)
+
+    # Alignment: indent, textRotation, shrinkToFit
+    ws["A7"].value = "Indented"
+    ws["A7"].alignment = Alignment(indent=2)
+
+    ws["B7"].value = "Rotated"
+    ws["B7"].alignment = Alignment(textRotation=45)
+
+    ws["C7"].value = "Shrink"
+    ws["C7"].alignment = Alignment(shrinkToFit=True)
+
+    # Alignment: readingOrder; Border: diagonal_up + diagonal style
+    ws["A8"].value = "RTL"
+    ws["A8"].alignment = Alignment(readingOrder=2)
+
+    ws["B8"].value = "Diagonal"
+    ws["B8"].border = Border(
+        diagonal=Side(border_style="thin", color=Color(rgb="FF000000")),
+        diagonalUp=True,
+        diagonalDown=True,
+    )
+
+    # Border: start and end sides
+    ws["C8"].value = "Start/End"
+    ws["C8"].border = Border(
+        start=Side(border_style="medium", color=Color(rgb="FF0000FF")),
+        end=Side(border_style="dashed", color=Color(rgb="FFFF0000")),
+    )
+
+    # Fill: patterned (non-solid) with fg_color and bg_color
+    ws["A9"].value = "Pattern Fill"
+    ws["A9"].fill = PatternFill(
+        patternType="gray125",
+        fgColor=Color(rgb="FF000000"),
+        bgColor=Color(rgb="FFFFFFFF"),
+    )
+
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(FIXTURE_PATH))
 
@@ -128,8 +177,7 @@ def _create_fixture() -> None:
 def pytest_configure(config) -> None:
     _patch_windows_mkdir_mode()
     _configure_stable_basetemp(config)
-    if not FIXTURE_PATH.exists():
-        _create_fixture()
+    _create_fixture()
 
 
 @pytest.fixture(scope="session")

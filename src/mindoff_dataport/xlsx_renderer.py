@@ -1040,14 +1040,25 @@ def _edge_border(
 
 
 def _edge_border_schema(
-    borders: dict[str, dict[str, Any]], cell_range: CellRange, row: int, col: int
-) -> dict[str, dict[str, Any]] | None:
-    empty = {"style": None, "color": None}
-    result = {
+    borders: dict[str, Any], cell_range: CellRange, row: int, col: int
+) -> dict[str, Any] | None:
+    empty: dict[str, Any] = {"style": None, "color": None}
+    # Only materialize the visible outline for synthesized merged cells.
+    # Writing interior horizontal/vertical merge borders onto every cell can
+    # make Excel hide left/right edges even though openpyxl round-trips them.
+    result: dict[str, Any] = {
         "top": dict(empty),
         "bottom": dict(empty),
         "left": dict(empty),
         "right": dict(empty),
+        "start": dict(empty),
+        "end": dict(empty),
+        "horizontal": dict(empty),
+        "vertical": dict(empty),
+        "diagonal": dict(borders.get("diagonal", empty)),
+        "diagonal_up": borders.get("diagonal_up", False),
+        "diagonal_down": borders.get("diagonal_down", False),
+        "outline": borders.get("outline", True),
     }
     if row == cell_range.min_row:
         result["top"] = dict(borders["top"])
@@ -1055,9 +1066,16 @@ def _edge_border_schema(
         result["bottom"] = dict(borders["bottom"])
     if col == cell_range.min_col:
         result["left"] = dict(borders["left"])
+        result["start"] = dict(borders.get("start", empty))
     if col == cell_range.max_col:
         result["right"] = dict(borders["right"])
-    return result if any(side.get("style") for side in result.values()) else None
+        result["end"] = dict(borders.get("end", empty))
+
+    _side_keys = ("top", "bottom", "left", "right", "start", "end",
+                  "horizontal", "vertical", "diagonal")
+    has_style = any(result[k].get("style") for k in _side_keys)
+    has_diagonal = result.get("diagonal_up") or result.get("diagonal_down")
+    return result if (has_style or has_diagonal) else None
 
 
 def _apply_streaming_merges(ws, schema: SheetSchema) -> None:

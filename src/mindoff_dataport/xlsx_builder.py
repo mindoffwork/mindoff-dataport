@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import functools
@@ -23,15 +23,23 @@ from .style_conversion import argb_to_color, dict_to_border_side
 
 # §1. Constants & Exceptions
 
+_BORDER_SIDE_KEYS = (
+    "top", "bottom", "left", "right",
+    "start", "end", "horizontal", "vertical", "diagonal",
+)
+
 # §2. Classes and Sub Classes
 
 # §3. Private Helper Functions
 
 
 def _apply_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
-    col_mode = schema.get("column_width_mode", "fixed")
-    row_mode = schema.get("row_height_mode", "fixed")
+    _apply_column_dimensions(ws, schema)
+    _apply_row_dimensions(ws, schema)
 
+
+def _apply_column_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
+    col_mode = schema.get("column_width_mode", "fixed")
     if col_mode == "fixed":
         for col_letter, width in schema["column_widths"].items():
             if width is not None:
@@ -41,6 +49,9 @@ def _apply_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
         for col_letter in _cols_in_range(schema["dimensions"]):
             ws.column_dimensions[col_letter].width = width
 
+
+def _apply_row_dimensions(ws: Worksheet, schema: SheetSchema) -> None:
+    row_mode = schema.get("row_height_mode", "fixed")
     if row_mode == "fixed":
         for row_str, height in schema["row_heights"].items():
             if height is not None:
@@ -118,8 +129,17 @@ def _freeze(d: dict) -> tuple:
 @functools.lru_cache(maxsize=512)
 def _cached_font(key: tuple) -> Font:
     d = dict(key)
-    color = argb_to_color(d["color"])
-    kwargs = {k: d[k] for k in ("name", "size", "bold", "italic", "underline")}
+    color = argb_to_color(d.get("color"))
+    kwargs: dict = {
+        "name": d.get("name"),
+        "size": d.get("size"),
+        "bold": d.get("bold", False),
+        "italic": d.get("italic", False),
+        "underline": d.get("underline"),
+        "strike": d.get("strike", False),
+    }
+    if d.get("vert_align") is not None:
+        kwargs["vertAlign"] = d["vert_align"]
     if color is not None:
         kwargs["color"] = color
     return Font(**kwargs)
@@ -128,29 +148,62 @@ def _cached_font(key: tuple) -> Font:
 @functools.lru_cache(maxsize=512)
 def _cached_fill(key: tuple) -> PatternFill:
     d = dict(key)
-    if d["bg_color"] is None:
+    pt = d.get("pattern_type") or d.get("bg_color") and "solid"
+    if not pt:
         return PatternFill()
-    color = argb_to_color(d["bg_color"])
-    return PatternFill(patternType="solid", fgColor=color)
+    fg = argb_to_color(d.get("fg_color") or d.get("bg_color"))
+    bg = argb_to_color(d.get("bg_color") if d.get("fg_color") else None)
+    kwargs: dict = {"patternType": pt}
+    if fg is not None:
+        kwargs["fgColor"] = fg
+    if bg is not None:
+        kwargs["bgColor"] = bg
+    return PatternFill(**kwargs)
 
 
 @functools.lru_cache(maxsize=512)
 def _cached_alignment(key: tuple) -> Alignment:
     d = dict(key)
-    return Alignment(
-        horizontal=d["horizontal"], vertical=d["vertical"], wrap_text=d["wrap_text"]
-    )
+    kwargs: dict = {
+        "horizontal": d.get("horizontal"),
+        "vertical": d.get("vertical"),
+        "wrap_text": d.get("wrap_text", False),
+    }
+    if d.get("indent") is not None:
+        kwargs["indent"] = d["indent"]
+    if d.get("relative_indent") is not None:
+        kwargs["relativeIndent"] = d["relative_indent"]
+    if d.get("text_rotation") is not None:
+        kwargs["textRotation"] = d["text_rotation"]
+    if d.get("shrink_to_fit"):
+        kwargs["shrinkToFit"] = d["shrink_to_fit"]
+    if d.get("reading_order") is not None:
+        kwargs["readingOrder"] = d["reading_order"]
+    return Alignment(**kwargs)
+
+
+_FROZEN_EMPTY_SIDE = (("color", None), ("style", None))
+
+
+def _has_border_side(data: dict) -> bool:
+    return bool(data.get("style") or data.get("color"))
 
 
 @functools.lru_cache(maxsize=512)
 def _cached_border(key: tuple) -> Border:
-    sides = {k: dict(v) for k, v in key}
-    return Border(
-        top=dict_to_border_side(sides["top"]),
-        bottom=dict_to_border_side(sides["bottom"]),
-        left=dict_to_border_side(sides["left"]),
-        right=dict_to_border_side(sides["right"]),
-    )
+    d = dict(key)
+    kwargs = {
+        k: dict_to_border_side(dict(d.get(k, _FROZEN_EMPTY_SIDE)))
+        for k in ("top", "bottom", "left", "right")
+    }
+    for key_name in ("start", "end", "horizontal", "vertical", "diagonal"):
+        side = dict(d.get(key_name, _FROZEN_EMPTY_SIDE))
+        if _has_border_side(side):
+            kwargs[key_name] = dict_to_border_side(side)
+    kwargs["diagonalUp"] = bool(d.get("diagonal_up", False))
+    kwargs["diagonalDown"] = bool(d.get("diagonal_down", False))
+    kwargs["outline"] = bool(d.get("outline", True))
+    return Border(**kwargs)
 
 
 def _build_font(schema: FontSchema) -> Font:

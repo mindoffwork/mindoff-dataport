@@ -48,6 +48,7 @@ Notes:
 - PDF export uses ReportLab, starts each sheet on a new page, and paginates overflow rows vertically.
 - PDF export supports optional custom TrueType/OpenType fonts via the `fonts` option.
 - PDF export draws only template borders; it must not add a default grid over empty spacer cells.
+- PDF renders `strike` and `vert_align` (superscript/subscript) via ReportLab paragraph markup; `indent`/`relative_indent` via cell padding; `justify`/`distributed` alignment via `TA_JUSTIFY`; pattern fills approximated by background color. `text_rotation` and diagonal borders are captured in schema but not rendered in PDF.
 - PDF dataframe-content export streams rows into bounded table chunks, rejects `column_width_mode="hug"`, and allows `row_height_mode="hug"`.
 - `template_contract.py` owns placeholder discovery, input contracts, payload validation, scalar substitution, and sheet payload resolution.
 - `xlsx_builder.py` contains XLSX style/sizing helper functions used by `xlsx_renderer.py`.
@@ -59,11 +60,12 @@ Notes:
 
 - `merged_regions` is authoritative during build, except renderer-owned dataframe `occupation` merges generated from anchor metadata.
 - XLSX/PDF must consume the same resolved dataframe layout/style plan; PDF differences are limited to supplied font availability and deterministic page scaling.
-- Merged-cell borders must render around the full merged region, not only the anchor cell.
+- Merged-cell borders must render around the full merged region, not only the anchor cell. XLSX merged-cell materialization must preserve visible outline/diagonal borders without emitting interior (`horizontal`/`vertical`) merge fields that can suppress left/right edges in Excel.
 - Renderer-generated dataframe `occupation` merges must apply anchor border styling on every generated row, not only the first row.
+- `start`/`end` border sides are LTR/RTL-aware; PDF resolves them against `reading_order` when drawing left/right edges.
 - Preserve formulas (`data_only=False`).
 - Bundle compilation must not mutate input templates.
-- Use `fgColor` for solid fills.
+- `FillSchema` uses `pattern_type`, `fg_color` (visible color for solid fills), `bg_color` (pattern background). Old `bg_color`-only shape is handled defensively in the builder but canonical form requires all three keys.
 - Preserve sheet gridline visibility via `show_gridlines`.
 - Builder converts JSON row keys from `str` to `int`.
 - Openpyxl styles are immutable; create new style objects.

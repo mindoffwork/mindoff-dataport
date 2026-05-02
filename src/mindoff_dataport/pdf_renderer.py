@@ -10,7 +10,7 @@ from typing import Any
 from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, legal, letter, landscape, portrait
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -308,7 +308,49 @@ def _paragraph_alignment(value: str | None) -> int:
         return TA_CENTER
     if value == "right":
         return TA_RIGHT
+    if value in {"justify", "distributed"}:
+        return TA_JUSTIFY
     return TA_LEFT
+
+
+def _pdf_fill_color(fill: dict) -> "colors.Color | None":
+    """Return the display background color for a fill, or None for no fill."""
+    pt = fill.get("pattern_type")
+    # Backward compat: old schema used only bg_color for solid fills.
+    legacy_bg = fill.get("bg_color") if not fill.get("fg_color") else None
+    if not pt and not legacy_bg:
+        return None
+    if not pt or pt == "solid":
+        return _hex_color(fill.get("fg_color") or legacy_bg)
+    # Patterned fills: prefer bg_color unless it is white/absent, then fall back to fg_color.
+    bg_c = _hex_color(fill.get("bg_color"))
+    fg_c = _hex_color(fill.get("fg_color"))
+    white = colors.HexColor("#FFFFFF")
+    return bg_c if (bg_c is not None and bg_c != white) else (fg_c or bg_c)
+
+
+def _indent_points(alignment: dict) -> float:
+    """Convert indent + relative_indent to PDF padding points (1 unit ≈ 7 pt)."""
+    indent = int(alignment.get("indent") or 0)
+    rel = int(alignment.get("relative_indent") or 0)
+    total = max(0, indent + rel)
+    return total * 7.0
+
+
+def _effective_left_border(borders: dict, is_rtl: bool) -> dict:
+    """Resolve left edge border, merging directional start/end for RTL awareness."""
+    primary = "right" if is_rtl else "left"
+    secondary = "end" if is_rtl else "start"
+    side = borders.get(primary, {})
+    return side if side.get("style") else borders.get(secondary, {"style": None, "color": None})
+
+
+def _effective_right_border(borders: dict, is_rtl: bool) -> dict:
+    """Resolve right edge border, merging directional start/end for RTL awareness."""
+    primary = "left" if is_rtl else "right"
+    secondary = "start" if is_rtl else "end"
+    side = borders.get(primary, {})
+    return side if side.get("style") else borders.get(secondary, {"style": None, "color": None})
 
 
 def _vertical_alignment(value: str | None) -> str:
@@ -325,8 +367,7 @@ def _paragraph(cell: CellSchema, font_resolver: _FontResolver) -> Paragraph | st
         return ""
 
     font = cell["font"]
-    if font.get("underline"):
-        text = f"<u>{text}</u>"
+    text = _apply_inline_markup(text, font)
 
     font_size = float(font.get("size") or 11.0)
     color = _hex_color(font.get("color"))
@@ -341,6 +382,20 @@ def _paragraph(cell: CellSchema, font_resolver: _FontResolver) -> Paragraph | st
     wrap = cell["alignment"].get("wrap_text", False)
     text_body = text.replace("\n", "<br/>") if wrap else text.replace("\n", " ")
     return Paragraph(text_body, style)
+
+
+def _apply_inline_markup(text: str, font: dict) -> str:
+    """Wrap text in ReportLab XML markup tags for underline, strike, vert_align."""
+    if font.get("underline"):
+        text = f"<u>{text}</u>"
+    if font.get("strike"):
+        text = f"<strike>{text}</strike>"
+    vert = font.get("vert_align")
+    if vert == "superscript":
+        text = f"<super>{text}</super>"
+    elif vert == "subscript":
+        text = f"<sub>{text}</sub>"
+    return text
 
 
 def _coord_indexes(coord: str) -> tuple[int, int]:
@@ -456,7 +511,6 @@ def _style_cell(
 ) -> None:
     point = (col_idx - min_col, row_idx - min_row)
     font = cell["font"]
-    fill = cell["fill"]
     alignment = cell["alignment"]
 
     commands.append(("FONTNAME", point, point, font_resolver.font_name(font)))
@@ -464,22 +518,39 @@ def _style_cell(
     font_color = _hex_color(font.get("color"))
     if font_color is not None:
         commands.append(("TEXTCOLOR", point, point, font_color))
-    fill_color = _hex_color(fill.get("bg_color"))
+    fill_color = _pdf_fill_color(cell["fill"])
     if fill_color is not None:
         commands.append(("BACKGROUND", point, point, fill_color))
     commands.append(("ALIGN", point, point, _alignment(alignment.get("horizontal"))))
     commands.append(
         ("VALIGN", point, point, _vertical_alignment(alignment.get("vertical")))
     )
-    commands.append(("LEFTPADDING", point, point, 0))
-    commands.append(("RIGHTPADDING", point, point, 0))
-    commands.append(("TOPPADDING", point, point, 0))
-    commands.append(("BOTTOMPADDING", point, point, 0))
+    _apply_cell_padding(commands, point, alignment)
+    _apply_cell_borders(commands, point, cell["borders"], alignment)
 
-    _border(commands, point, "LINEABOVE", cell["borders"]["top"])
-    _border(commands, point, "LINEBELOW", cell["borders"]["bottom"])
-    _border(commands, point, "LINEBEFORE", cell["borders"]["left"])
-    _border(commands, point, "LINEAFTER", cell["borders"]["right"])
+
+def _apply_cell_padding(
+    commands: list[tuple[Any, ...]], point: tuple[int, int], alignment: dict
+) -> None:
+    indent_pts = _indent_points(alignment)
+    is_rtl = int(alignment.get("reading_order") or 0) == 2
+    commands.append(("LEFTPADDING", point, point, max(indent_pts, 3) if not is_rtl else 3))
+    commands.append(("RIGHTPADDING", point, point, max(indent_pts, 3) if is_rtl else 3))
+    commands.append(("TOPPADDING", point, point, 2))
+    commands.append(("BOTTOMPADDING", point, point, 2))
+
+
+def _apply_cell_borders(
+    commands: list[tuple[Any, ...]],
+    point: tuple[int, int],
+    borders: dict,
+    alignment: dict,
+) -> None:
+    is_rtl = int(alignment.get("reading_order") or 0) == 2
+    _border(commands, point, "LINEABOVE", borders["top"])
+    _border(commands, point, "LINEBELOW", borders["bottom"])
+    _border(commands, point, "LINEBEFORE", _effective_left_border(borders, is_rtl))
+    _border(commands, point, "LINEAFTER", _effective_right_border(borders, is_rtl))
 
 
 def _border(
@@ -559,10 +630,11 @@ def _merged_border_commands(
         start = (region.min_col - min_col, region.min_row - min_row)
         end = (region.max_col - min_col, region.max_row - min_row)
         borders = anchor["borders"]
+        is_rtl = int(anchor["alignment"].get("reading_order") or 0) == 2
         _border_range(commands, start, end, "LINEABOVE", borders["top"])
         _border_range(commands, start, end, "LINEBELOW", borders["bottom"])
-        _border_range(commands, start, end, "LINEBEFORE", borders["left"])
-        _border_range(commands, start, end, "LINEAFTER", borders["right"])
+        _border_range(commands, start, end, "LINEBEFORE", _effective_left_border(borders, is_rtl))
+        _border_range(commands, start, end, "LINEAFTER", _effective_right_border(borders, is_rtl))
     return commands
 
 
@@ -590,25 +662,35 @@ def _merged_style_commands(
             continue
         start = (region.min_col - min_col, region.min_row - min_row)
         end = (region.max_col - min_col, region.max_row - min_row)
-        font = anchor["font"]
-        fill = anchor["fill"]
-        alignment = anchor["alignment"]
-
-        commands.append(("FONTNAME", start, end, font_resolver.font_name(font)))
-        commands.append(("FONTSIZE", start, end, float(font.get("size") or 11.0)))
-        font_color = _hex_color(font.get("color"))
-        if font_color is not None:
-            commands.append(("TEXTCOLOR", start, end, font_color))
-        fill_color = _hex_color(fill.get("bg_color"))
-        if fill_color is not None:
-            commands.append(("BACKGROUND", start, end, fill_color))
-        commands.append(("ALIGN", start, end, _alignment(alignment.get("horizontal"))))
-        commands.append(("VALIGN", start, end, _vertical_alignment(alignment.get("vertical"))))
-        commands.append(("LEFTPADDING", start, end, 0))
-        commands.append(("RIGHTPADDING", start, end, 0))
-        commands.append(("TOPPADDING", start, end, 0))
-        commands.append(("BOTTOMPADDING", start, end, 0))
+        _merged_region_style(commands, anchor, start, end, font_resolver)
     return commands
+
+
+def _merged_region_style(
+    commands: list[tuple[Any, ...]],
+    anchor: CellSchema,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    font_resolver: _FontResolver,
+) -> None:
+    font = anchor["font"]
+    alignment = anchor["alignment"]
+    commands.append(("FONTNAME", start, end, font_resolver.font_name(font)))
+    commands.append(("FONTSIZE", start, end, float(font.get("size") or 11.0)))
+    font_color = _hex_color(font.get("color"))
+    if font_color is not None:
+        commands.append(("TEXTCOLOR", start, end, font_color))
+    fill_color = _pdf_fill_color(anchor["fill"])
+    if fill_color is not None:
+        commands.append(("BACKGROUND", start, end, fill_color))
+    commands.append(("ALIGN", start, end, _alignment(alignment.get("horizontal"))))
+    commands.append(("VALIGN", start, end, _vertical_alignment(alignment.get("vertical"))))
+    indent_pts = _indent_points(alignment)
+    is_rtl = int(alignment.get("reading_order") or 0) == 2
+    commands.append(("LEFTPADDING", start, end, indent_pts if not is_rtl else 0))
+    commands.append(("RIGHTPADDING", start, end, indent_pts if is_rtl else 0))
+    commands.append(("TOPPADDING", start, end, 0))
+    commands.append(("BOTTOMPADDING", start, end, 0))
 
 
 def _table_style(
@@ -777,7 +859,7 @@ def _dataframe_pdf_rows(
                 content_cell["alignment"] = _layout_alignment(anchor["cell"], layout)
                 row_cells[col_idx] = content_cell  # type: ignore[assignment]
             row_merges.extend(_anchor_row_merges(anchor, row_idx))
-        yield {"cells": row_cells, "merges": row_merges}
+        yield {"cells": row_cells, "merges": row_merges, "row_idx": row_idx}
 
 
 def _chunked_row_tables(
@@ -805,7 +887,7 @@ def _chunked_row_tables(
                 max_col,
                 available_width,
                 font_resolver,
-                chunk_row_height=chunk_row_height,
+                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
             )
             chunk = []
         chunk.append(row_item)
@@ -817,7 +899,7 @@ def _chunked_row_tables(
                 max_col,
                 available_width,
                 font_resolver,
-                chunk_row_height=chunk_row_height,
+                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
             )
             chunk = []
     if chunk:
@@ -828,7 +910,7 @@ def _chunked_row_tables(
             max_col,
             available_width,
             font_resolver,
-            chunk_row_height=chunk_row_height,
+            per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
         )
 
 
@@ -1083,7 +1165,30 @@ def _static_pdf_rows(
             cell_row, col_idx = _coord_indexes(cell["coordinate"])
             if cell_row == row_idx:
                 row_cells[col_idx] = cell
-        yield {"cells": row_cells, "merges": _static_row_merges(sheet, row_idx)}
+        yield {"cells": row_cells, "merges": _static_row_merges(sheet, row_idx), "row_idx": row_idx}
+
+
+def _per_row_heights(
+    sheet: SheetSchema,
+    rows: list[dict[str, Any]],
+    data_row_height: float | None,
+) -> list[float] | None:
+    """Build a per-row height list, using explicit template heights for static rows
+    and data_row_height for generated content rows (no explicit schema entry)."""
+    mode = sheet.get("row_height_mode", "fixed")
+    if mode == "hug":
+        return None
+    row_heights_map = sheet.get("row_heights", {})
+    default = float(sheet.get("default_row_height", _DEFAULT_ROW_HEIGHT))
+    out: list[float] = []
+    for item in rows:
+        row_idx = item.get("row_idx")
+        if row_idx is not None:
+            h = row_heights_map.get(str(row_idx))
+            out.append(float(h) if h else (data_row_height or default))
+        else:
+            out.append(data_row_height or default)
+    return out
 
 
 def _row_chunk_table(
@@ -1094,7 +1199,7 @@ def _row_chunk_table(
     available_width: float,
     font_resolver: _FontResolver,
     *,
-    chunk_row_height: float | None = None,
+    per_row_heights: list[float] | None = None,
 ) -> Table:
     cells: dict[tuple[int, int], CellSchema] = {}
     merged_regions: list[str] = []
@@ -1125,7 +1230,7 @@ def _row_chunk_table(
             len(rows),
             available_width,
         ),
-        rowHeights=[chunk_row_height] * len(rows) if chunk_row_height is not None else None,
+        rowHeights=per_row_heights,
         repeatRows=0,
         splitByRow=1,
     )

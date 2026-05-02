@@ -1,4 +1,4 @@
-﻿import json
+import json
 
 import openpyxl
 import pytest
@@ -91,10 +91,33 @@ def test_font_bold_italic(workbook_schema):
     assert font["color"] is not None
 
 
-def test_fill_color_captured(workbook_schema):
+def test_font_strike_captured(workbook_schema):
+    font = workbook_schema["sheets"][0]["cells"]["A6"]["font"]
+    assert font["strike"] is True
+
+
+def test_font_vert_align_superscript(workbook_schema):
+    font = workbook_schema["sheets"][0]["cells"]["B6"]["font"]
+    assert font["vert_align"] == "superscript"
+
+
+def test_font_vert_align_subscript(workbook_schema):
+    font = workbook_schema["sheets"][0]["cells"]["C6"]["font"]
+    assert font["vert_align"] == "subscript"
+
+
+def test_fill_solid_fg_color_captured(workbook_schema):
     fill = workbook_schema["sheets"][0]["cells"]["C4"]["fill"]
+    assert fill["pattern_type"] == "solid"
+    assert fill["fg_color"] is not None
+    assert len(fill["fg_color"]) == 8
+
+
+def test_fill_pattern_type_captured(workbook_schema):
+    fill = workbook_schema["sheets"][0]["cells"]["A9"]["fill"]
+    assert fill["pattern_type"] == "gray125"
+    assert fill["fg_color"] is not None
     assert fill["bg_color"] is not None
-    assert len(fill["bg_color"]) == 8
 
 
 def test_borders_captured(workbook_schema):
@@ -102,6 +125,19 @@ def test_borders_captured(workbook_schema):
     assert borders["top"]["style"] == "thick"
     assert borders["left"]["style"] == "medium"
     assert borders["right"]["style"] == "dashed"
+
+
+def test_border_diagonal_captured(workbook_schema):
+    borders = workbook_schema["sheets"][0]["cells"]["B8"]["borders"]
+    assert borders["diagonal"]["style"] == "thin"
+    assert borders["diagonal_up"] is True
+    assert borders["diagonal_down"] is True
+
+
+def test_border_start_end_captured(workbook_schema):
+    borders = workbook_schema["sheets"][0]["cells"]["C8"]["borders"]
+    assert borders["start"]["style"] == "medium"
+    assert borders["end"]["style"] == "dashed"
 
 
 def test_merged_region_border_is_captured_from_edges(managed_tmp_dir):
@@ -127,6 +163,26 @@ def test_alignment_captured(workbook_schema):
     alignment = workbook_schema["sheets"][0]["cells"]["B5"]["alignment"]
     assert alignment["wrap_text"] is True
     assert alignment["horizontal"] == "center"
+
+
+def test_alignment_indent_captured(workbook_schema):
+    alignment = workbook_schema["sheets"][0]["cells"]["A7"]["alignment"]
+    assert alignment["indent"] == 2
+
+
+def test_alignment_text_rotation_captured(workbook_schema):
+    alignment = workbook_schema["sheets"][0]["cells"]["B7"]["alignment"]
+    assert alignment["text_rotation"] == 45
+
+
+def test_alignment_shrink_to_fit_captured(workbook_schema):
+    alignment = workbook_schema["sheets"][0]["cells"]["C7"]["alignment"]
+    assert alignment["shrink_to_fit"] is True
+
+
+def test_alignment_reading_order_captured(workbook_schema):
+    alignment = workbook_schema["sheets"][0]["cells"]["A8"]["alignment"]
+    assert alignment["reading_order"] == 2
 
 
 def test_column_widths_captured(workbook_schema):
