@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.3.0
 
 ### Fixes
 - 🐞 Fix repeat-sheet dataframe-content row offsets in streaming export ([#6](https://github.com/mindoffwork/mindoff-dataport/pull/6))
