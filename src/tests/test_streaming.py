@@ -619,7 +619,7 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
 
     wb = openpyxl.load_workbook(paths[0], data_only=True)
     ws = wb["Sheet1"]
-    assert [ws["A1"].value, ws["A4"].value, ws["A7"].value] == [
+    assert [ws["A1"].value, ws["A5"].value, ws["A9"].value] == [
         "Acme",
         "Globex",
         "Initech",
@@ -630,7 +630,7 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
         "A",
         1,
     ]
-    assert [ws["A8"].value, ws["B8"].value, ws["A9"].value, ws["B9"].value] == [
+    assert [ws["A10"].value, ws["B10"].value, ws["A11"].value, ws["B11"].value] == [
         "sku",
         "qty",
         "I",
