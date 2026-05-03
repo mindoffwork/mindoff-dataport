@@ -8,6 +8,9 @@
 ### Miscellaneous
 - ⏪ Revert #8 -- Organize mindoff_dataport into extract, compile, and render subpackages ([#9](https://github.com/mindoffwork/mindoff-dataport/pull/9))
 
+### Enhancements
+- ⚡ Speed up XLSX repeat streaming exports ([#10](https://github.com/mindoffwork/mindoff-dataport/pull/10))
+
 ## v0.3.0
 
 ### Fixes
