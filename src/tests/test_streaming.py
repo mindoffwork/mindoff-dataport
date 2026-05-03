@@ -749,6 +749,189 @@ def test_streaming_renders_repeat_records_in_one_sheet(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_streaming_renders_source_backed_repeat_records(managed_tmp_dir: Path):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{customer_name:string}}"),
+            "A3": _cell("A3", "{{line_items:dataframe}}"),
+            "A4": _cell("A4", ""),
+            "A5": _cell("A5", "{{reports:repeat-end}}"),
+        },
+        dims="A1:B5",
+    )
+
+    paths = _export_streaming(
+        schema,
+        {
+            "Sheet1": {
+                "reports": mo_dataport.repeat_records(
+                    polars.DataFrame(
+                        {"customer_name": ["Acme", "Globex", "Initech"]}
+                    ).lazy(),
+                    constants={
+                        "line_items": polars.DataFrame({"sku": ["A"], "qty": [1]})
+                    },
+                )
+            }
+        },
+        managed_tmp_dir,
+        streaming_chunk_rows=1,
+        max_rows_per_workbook=20,
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [ws["A1"].value, ws["A5"].value, ws["A9"].value] == [
+        "Acme",
+        "Globex",
+        "Initech",
+    ]
+    assert [ws["A2"].value, ws["B2"].value, ws["A3"].value, ws["B3"].value] == [
+        "sku",
+        "qty",
+        "A",
+        1,
+    ]
+    assert [ws["A10"].value, ws["B10"].value, ws["A11"].value, ws["B11"].value] == [
+        "sku",
+        "qty",
+        "A",
+        1,
+    ]
+    wb.close()
+
+
+def test_streaming_source_backed_repeat_resolves_default_theme_colors_for_xlsxwriter(
+    managed_tmp_dir: Path,
+):
+    anchor = _cell("A2", "{{name:string}}")
+    anchor["font"] = dict(anchor["font"])
+    anchor["font"]["color"] = "theme:1:0.0"
+    anchor["fill"] = {"pattern_type": "solid", "fg_color": "theme:4:0.0", "bg_color": None}
+    anchor["borders"] = dict(anchor["borders"])
+    anchor["borders"]["top"] = {"style": "thin", "color": "theme:1:0.0"}
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": anchor,
+            "A3": _cell("A3", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A3",
+    )
+
+    paths = _export_streaming(
+        schema,
+        {
+            "Sheet1": {
+                "reports": mo_dataport.repeat_records(
+                    polars.DataFrame({"name": ["Acme"]})
+                )
+            }
+        },
+        managed_tmp_dir,
+        streaming_engine="xlsxwriter",
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    assert wb["Sheet1"]["A1"].value == "Acme"
+    wb.close()
+
+
+def test_streaming_splits_source_backed_repeat_records(managed_tmp_dir: Path):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{name:string}}"),
+            "A3": _cell("A3", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A3",
+    )
+
+    paths = _export_streaming(
+        schema,
+        {
+            "Sheet1": {
+                "reports": mo_dataport.repeat_records(
+                    polars.DataFrame({"name": ["A", "B", "C"]})
+                )
+            }
+        },
+        managed_tmp_dir,
+        max_rows_per_workbook=2,
+    )
+
+    with ZipFile(paths[0]) as zip_file:
+        assert zip_file.namelist() == ["filled.part001.xlsx", "filled.part002.xlsx"]
+        zip_file.extractall(path=managed_tmp_dir)
+
+    wb1 = openpyxl.load_workbook(managed_tmp_dir / "filled.part001.xlsx", data_only=True)
+    wb2 = openpyxl.load_workbook(managed_tmp_dir / "filled.part002.xlsx", data_only=True)
+    assert [wb1["Sheet1"]["A1"].value, wb1["Sheet1"]["A2"].value] == ["A", "B"]
+    assert wb2["Sheet1"]["A1"].value == "C"
+    wb1.close()
+    wb2.close()
+
+
+def test_streaming_xlsxwriter_writes_static_and_dataframe_sheets(
+    managed_tmp_dir: Path,
+):
+    title = _cell("A1", "Title")
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FFFFFF00", "bg_color": None}
+    themed = _cell("B1", "Theme")
+    themed["font"] = dict(themed["font"])
+    themed["font"]["color"] = "theme:5:0.0"
+    themed["fill"] = {"pattern_type": "solid", "fg_color": "theme:4:0.0", "bg_color": None}
+    themed["borders"] = dict(themed["borders"])
+    themed["borders"]["top"] = {"style": "thin", "color": "theme:5:0.0"}
+    schema = _schema(
+        {
+            "A1": title,
+            "B1": themed,
+            "A2": _cell("A2", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:B2",
+    )
+    schema["theme_colors"] = [
+        "FFFFFFFF",
+        "FF000000",
+        "FFEEECE1",
+        "FF1F497D",
+        "FF112233",
+        "FF445566",
+        "FF9BBB59",
+        "FF8064A2",
+        "FF4BACC6",
+        "FFF79646",
+    ]
+    df = polars.DataFrame({"sku": ["A", "B"], "qty": [1, 2]})
+
+    paths = _export_streaming(
+        schema,
+        {"Sheet1": {"rows": df}},
+        managed_tmp_dir,
+        streaming_engine="xlsxwriter",
+        streaming_chunk_rows=1,
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [ws["A1"].value, ws["A2"].value, ws["B2"].value, ws["A3"].value, ws["B3"].value] == [
+        "Title",
+        "A",
+        1,
+        "B",
+        2,
+    ]
+    assert ws["A1"].fill.patternType == "solid"
+    assert ws["A1"].fill.fgColor.rgb == "FFFFFF00"
+    assert ws["B1"].fill.patternType == "solid"
+    assert ws["B1"].fill.fgColor.rgb == "FF112233"
+    assert ws["B1"].font.color.rgb == "FF445566"
+    assert ws["B1"].border.top.color.rgb == "FF445566"
+    wb.close()
+
+
 def test_streaming_repeat_dataframe_occupation_merges(managed_tmp_dir: Path):
     schema = _schema(
         {
@@ -993,6 +1176,37 @@ def test_pdf_renders_repeat_records(managed_tmp_dir: Path):
         },
     )
     out = managed_tmp_dir / "repeat.pdf"
+
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
+
+    assert out.exists()
+    assert out.read_bytes().startswith(b"%PDF")
+
+
+def test_pdf_renders_source_backed_repeat_records(managed_tmp_dir: Path):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{customer_name:string}}"),
+            "A3": _cell("A3", "{{line_items:dataframe}}"),
+            "A4": _cell("A4", "{{reports:repeat-end}}"),
+        },
+        dims="A1:B4",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": mo_dataport.repeat_records(
+                    polars.DataFrame({"customer_name": ["Acme", "Globex"]}),
+                    constants={
+                        "line_items": polars.DataFrame({"sku": ["A"], "qty": [1]})
+                    },
+                )
+            }
+        },
+    )
+    out = managed_tmp_dir / "source-repeat.pdf"
 
     mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
 

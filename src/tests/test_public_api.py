@@ -1,11 +1,14 @@
 ﻿import mindoff_dataport
 
+import pytest
+
 from mindoff_dataport import (
     compile_report_bundle,
     export_report_bundle,
     extract_template,
     get_template_inputs,
     mo_dataport,
+    repeat_records,
 )
 
 # §1. Constants & Exceptions
@@ -65,6 +68,7 @@ def test_mo_dataport_namespace_exposes_bundle_first_aliases():
     assert mo_dataport.inputs is get_template_inputs
     assert mo_dataport.compile is compile_report_bundle
     assert mo_dataport.export is export_report_bundle
+    assert mo_dataport.repeat_records is repeat_records
     assert not hasattr(mindoff_dataport, "parquet_source")
     assert not hasattr(mo_dataport, "parquet_source")
     assert not hasattr(mo_dataport, "build")
@@ -84,6 +88,42 @@ def test_mo_dataport_bundle_aliases_work(managed_tmp_dir):
     output = managed_tmp_dir / "out.xlsx"
     mo_dataport.export(bundle, str(output))
     assert output.exists()
+
+
+def test_export_rejects_streaming_engine_for_pdf(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+
+    with pytest.raises(ValueError, match="PDF export does not support streaming_engine"):
+        mo_dataport.export(
+            bundle,
+            str(managed_tmp_dir / "out.pdf"),
+            format="pdf",
+            streaming_engine="openpyxl",
+        )
+
+
+def test_export_rejects_xlsxwriter_for_fidelity(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+
+    with pytest.raises(ValueError, match="Fidelity XLSX export does not support"):
+        mo_dataport.export(
+            bundle,
+            str(managed_tmp_dir / "out.xlsx"),
+            export_mode="fidelity",
+            streaming_engine="xlsxwriter",
+        )
+
+
+def test_streaming_rejects_unknown_streaming_engine(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+
+    with pytest.raises(ValueError, match="Unsupported streaming_engine"):
+        mo_dataport.export(
+            bundle,
+            str(managed_tmp_dir / "out.xlsx"),
+            export_mode="streaming",
+            streaming_engine="fast",
+        )
 
 
 # §5. Entrypoints

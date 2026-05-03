@@ -103,8 +103,12 @@ class SheetSchema(_SheetSchemaRequired, total=False):
     repeat_sections: list[dict]
 
 
-class WorkbookSchema(TypedDict):
+class _WorkbookSchemaRequired(TypedDict):
     sheets: list[SheetSchema]
+
+
+class WorkbookSchema(_WorkbookSchemaRequired, total=False):
+    theme_colors: list[str]
 
 
 # §3. Private Helper Functions

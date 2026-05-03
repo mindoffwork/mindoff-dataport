@@ -19,7 +19,7 @@ from .schema import (
     WorkbookSchema,
 )
 from .page_breaks import extract_manual_breaks
-from .style_conversion import border_side_to_dict, normalize_color
+from .style_conversion import border_side_to_dict, extract_theme_colors, normalize_color
 
 # §1. Constants & Exceptions
 
@@ -298,7 +298,13 @@ def _has_border(side: BorderSide) -> bool:
 def extract_template(path: str) -> WorkbookSchema:
     """Load .xlsx at *path* and return a WorkbookSchema dict."""
     wb = openpyxl.load_workbook(path, data_only=False)
-    return {"sheets": [_extract_sheet(ws) for ws in wb.worksheets]}
+    try:
+        return {
+            "theme_colors": extract_theme_colors(wb.loaded_theme),
+            "sheets": [_extract_sheet(ws) for ws in wb.worksheets],
+        }
+    finally:
+        wb.close()
 
 
 # §5. Entrypoints
