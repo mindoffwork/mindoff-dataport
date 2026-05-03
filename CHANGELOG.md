@@ -5,6 +5,9 @@
 ### Internal
 - 🚚 Organize mindoff_dataport into extract, compile, and render subpackages ([#8](https://github.com/mindoffwork/mindoff-dataport/pull/8))
 
+### Miscellaneous
+- ⏪ Revert #8 -- Organize mindoff_dataport into extract, compile, and render subpackages ([#9](https://github.com/mindoffwork/mindoff-dataport/pull/9))
+
 ## v0.3.0
 
 ### Fixes
