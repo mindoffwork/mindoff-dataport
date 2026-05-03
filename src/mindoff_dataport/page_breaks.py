@@ -174,11 +174,23 @@ def _resolve_repeat_row_breaks(sheet: dict[str, Any], row_breaks: list[int]) -> 
             for break_idx in row_breaks
             if block_start <= break_idx <= block_end
         ]
-        for record in section["records"]:
-            resolved.extend(
-                _resolve_repeat_record_row_breaks(record, local_breaks, cursor_output)
-            )
-            cursor_output += int(record.get("block_height", section["block_height"]))
+        if section.get("record_source"):
+            record = {
+                "dataframe_anchors": section.get("dataframe_anchors", []),
+                "block_height": section.get("record_block_height", section["block_height"]),
+            }
+            record_height = int(record["block_height"])
+            for _ in range(int(section.get("record_count", 0))):
+                resolved.extend(
+                    _resolve_repeat_record_row_breaks(record, local_breaks, cursor_output)
+                )
+                cursor_output += record_height
+        else:
+            for record in section["records"]:
+                resolved.extend(
+                    _resolve_repeat_record_row_breaks(record, local_breaks, cursor_output)
+                )
+                cursor_output += int(record.get("block_height", section["block_height"]))
         cursor_template = int(section["end_row"]) + 1
 
     for break_idx in row_breaks:
@@ -193,7 +205,12 @@ def _resolve_repeat_column_breaks(
     footprints: list[dict[str, int]] = []
     for section in sheet.get("repeat_sections", []):
         widest_by_start_col: dict[int, dict[str, int]] = {}
-        for record in section["records"]:
+        records = (
+            [{"dataframe_anchors": section.get("dataframe_anchors", [])}]
+            if section.get("record_source")
+            else section["records"]
+        )
+        for record in records:
             for footprint in _grouped_record_footprints(record.get("dataframe_anchors", [])):
                 start_col = int(footprint["start_col"])
                 existing = widest_by_start_col.get(start_col)
@@ -209,8 +226,13 @@ def _repeat_rendered_max_row(sheet: dict[str, Any]) -> int:
     cursor_output = min_row
     for section in sheet.get("repeat_sections", []):
         cursor_output += max(int(section["start_row"]) - cursor_template, 0)
-        for record in section["records"]:
-            cursor_output += int(record.get("block_height", section["block_height"]))
+        if section.get("record_source"):
+            cursor_output += int(section.get("record_count", 0)) * int(
+                section.get("record_block_height", section["block_height"])
+            )
+        else:
+            for record in section["records"]:
+                cursor_output += int(record.get("block_height", section["block_height"]))
         cursor_template = int(section["end_row"]) + 1
     cursor_output += max(max_row - cursor_template + 1, 0)
     return max(cursor_output - 1, min_row)

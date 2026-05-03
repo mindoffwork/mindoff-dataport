@@ -32,6 +32,7 @@ from .xlsx_builder import (
 )
 from .bundle import ReportBundle, load_report_bundle
 from .page_breaks import apply_manual_breaks
+from .style_conversion import resolve_theme_color
 from .template_contract import _infer_cell_type, _parse_dims
 from .schema import CellSchema, SheetSchema
 
@@ -66,6 +67,32 @@ def _source_rows(
         yield from _parquet_rows(_source_path(bundle, path), source["columns"], batch_size)
         return
     raise ValueError(f"Unsupported dataframe source format: {source['format']!r}")
+
+
+def _cached_source_rows(
+    bundle: ReportBundle, source: dict[str, Any], *, batch_size: int
+) -> Iterable[tuple[Any, ...]]:
+    cell_count = int(source.get("rows", 0)) * len(source.get("columns", []))
+    if cell_count > 100_000:
+        return _source_rows(bundle, source, batch_size=batch_size)
+    cache = getattr(bundle, "_mindoff_row_cache", None)
+    if cache is None:
+        cache = {}
+        object.__setattr__(bundle, "_mindoff_row_cache", cache)
+    key = source["path"]
+    rows = cache.get(key)
+    if rows is None:
+        rows = list(_source_rows(bundle, source, batch_size=batch_size))
+        cache[key] = rows
+    return rows
+
+
+def _source_dict_rows(
+    bundle: ReportBundle, source: dict[str, Any], *, batch_size: int
+) -> Iterator[dict[str, Any]]:
+    columns = [str(column) for column in source["columns"]]
+    for row in _source_rows(bundle, source, batch_size=batch_size):
+        yield dict(zip(columns, row))
 
 
 def _source_path(bundle: ReportBundle, relative_path: str) -> Path:
@@ -182,15 +209,16 @@ def _layout_merge_range(
 def _anchor_row_merges(anchor: dict[str, Any], row_idx: int) -> list[dict[str, Any]]:
     merges: list[dict[str, Any]] = []
     for layout in _anchor_layouts(anchor):
-        merge_range = _layout_merge_range(anchor, layout, row_idx)
-        if merge_range is None:
+        occupation = int(layout["occupation"])
+        if occupation <= 1:
             continue
+        start_col = int(anchor["start_col"]) + int(layout["start_col_offset"])
         merges.append(
             {
                 "min_row_offset": 0,
                 "max_row_offset": 0,
-                "min_col": merge_range.min_col,
-                "max_col": merge_range.max_col,
+                "min_col": start_col,
+                "max_col": start_col + occupation - 1,
             }
         )
     return merges
@@ -464,6 +492,7 @@ def _render_streaming(
     bundle: ReportBundle,
     output_path: str,
     *,
+    streaming_engine: str,
     column_width_mode: str | None,
     row_height_mode: str | None,
     default_column_width: float | None,
@@ -496,6 +525,8 @@ def _render_streaming(
         )
         for sheet in bundle.report["sheets"]
     ]
+    if streaming_engine == "xlsxwriter":
+        return _render_streaming_xlsxwriter(output_path, plans, max_rows_per_workbook)
     content_iters = [
         plan["content"]
         for plan in plans
@@ -583,6 +614,8 @@ def _streaming_plan(
 
     return {
         "sheet": sheet,
+        "theme_colors": bundle.report.get("theme_colors")
+        or bundle.manifest.get("theme_colors"),
         "static": static,
         "generated_merges": generated_merges,
         "content": content,
@@ -594,9 +627,527 @@ def _streaming_plan(
     }
 
 
+def _render_streaming_xlsxwriter(
+    output_path: str,
+    plans: list[dict[str, Any]],
+    max_rows_per_workbook: int,
+) -> list[str]:
+    import xlsxwriter
+
+    content_iters = [plan["content"] for plan in plans if plan["content"] is not None]
+    output_paths: list[str] = []
+    part = 1
+    while part == 1 or any(not item["exhausted"] for item in content_iters):
+        final_path = _part_path(output_path, part)
+        workbook = xlsxwriter.Workbook(final_path, {"constant_memory": True})
+        wrote_any = False
+        for plan in plans:
+            worksheet = workbook.add_worksheet(plan["sheet"]["name"])
+            _apply_xlsxwriter_sheet_options(workbook, worksheet, plan["sheet"])
+            wrote = _write_xlsxwriter_streaming_sheet(
+                workbook,
+                worksheet,
+                plan,
+                max_rows_per_workbook,
+            )
+            wrote_any = wrote_any or wrote
+        workbook.close()
+        if part > 1 and not wrote_any:
+            Path(final_path).unlink(missing_ok=True)
+            break
+        output_paths.append(final_path)
+        part += 1
+    return _bundle_parts_if_needed(output_path, output_paths)
+
+
+def _apply_xlsxwriter_sheet_options(workbook, worksheet, schema: SheetSchema) -> None:
+    del workbook
+    if not schema.get("show_gridlines", True):
+        worksheet.hide_gridlines(2)
+    col_mode = schema.get("column_width_mode", "fixed")
+    row_mode = schema.get("row_height_mode", "fixed")
+    min_col, min_row, max_col, max_row = _parse_dims(schema["dimensions"])
+    if col_mode == "fixed":
+        for col_letter, width in schema["column_widths"].items():
+            if width is not None:
+                col_idx = column_index_from_string(col_letter) - 1
+                worksheet.set_column(col_idx, col_idx, width)
+    elif col_mode == "even":
+        width = schema.get("default_column_width", 15.0)
+        worksheet.set_column(min_col - 1, max_col - 1, width)
+    if row_mode == "fixed":
+        for row_str, height in schema["row_heights"].items():
+            if height is not None:
+                worksheet.set_row(int(row_str) - 1, height)
+    elif row_mode == "even":
+        height = schema.get("default_row_height", 15.0)
+        for row_idx in range(min_row, max_row + 1):
+            worksheet.set_row(row_idx - 1, height)
+
+
+def _apply_xlsxwriter_static_merges(worksheet, schema: SheetSchema) -> None:
+    for region in schema.get("merged_regions", []):
+        cell_range = CellRange(region)
+        _add_xlsxwriter_merge(
+            worksheet,
+            cell_range.min_row - 1,
+            cell_range.min_col - 1,
+            cell_range.max_row - 1,
+            cell_range.max_col - 1,
+        )
+
+
+def _write_xlsxwriter_streaming_sheet(
+    workbook,
+    worksheet,
+    plan: dict[str, Any],
+    max_rows_per_workbook: int,
+) -> bool:
+    if plan.get("repeat_rows") is not None:
+        return _write_xlsxwriter_repeat_sheet(
+            workbook,
+            worksheet,
+            plan,
+            max_rows_per_workbook,
+        )
+
+    content = plan["content"]
+    anchor = content["anchor"] if content is not None else None
+    max_col = plan["max_col"]
+    if anchor is not None:
+        max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
+    wrote_content = False
+    written_rows = 0
+
+    for row_idx in range(plan["min_row"], max(plan["max_row"], plan["min_row"]) + 1):
+        if row_idx > max_rows_per_workbook:
+            break
+        _write_xlsxwriter_static_row(workbook, worksheet, plan, row_idx, max_col)
+        if anchor is not None and row_idx >= anchor["start_row"]:
+            wrote_content = _fill_xlsxwriter_streaming_row(
+                workbook, worksheet, plan, anchor, content, row_idx
+            ) or wrote_content
+        for merge_range in plan.get("generated_merges", {}).get(row_idx, []):
+            _add_xlsxwriter_cell_range_merge(worksheet, merge_range)
+        written_rows += 1
+
+    if anchor is not None:
+        row_idx = max(plan["max_row"] + 1, anchor["start_row"])
+        while row_idx <= max_rows_per_workbook and not content["exhausted"]:
+            wrote_content = _fill_xlsxwriter_streaming_row(
+                workbook, worksheet, plan, anchor, content, row_idx
+            ) or wrote_content
+            if content["exhausted"]:
+                break
+            written_rows += 1
+            row_idx += 1
+    _apply_xlsxwriter_static_merges(worksheet, plan["sheet"])
+    _apply_xlsxwriter_page_breaks(worksheet, plan["sheet"], written_rows)
+    return wrote_content
+
+
+def _write_xlsxwriter_static_row(
+    workbook,
+    worksheet,
+    plan: dict[str, Any],
+    row_idx: int,
+    max_col: int,
+) -> None:
+    row_zero = row_idx - 1
+    for col_idx in range(plan["min_col"], max_col + 1):
+        static = plan["static"].get((row_idx, col_idx))
+        if static is not None:
+            _write_xlsxwriter_cell(
+                workbook,
+                worksheet,
+                row_zero,
+                col_idx - 1,
+                static,
+                plan.get("theme_colors"),
+            )
+
+
+def _fill_xlsxwriter_streaming_row(
+    workbook,
+    worksheet,
+    plan: dict[str, Any],
+    anchor: dict[str, Any],
+    content: dict[str, Any],
+    row_idx: int,
+) -> bool:
+    try:
+        row_values = next(content["rows"])
+    except StopIteration:
+        content["exhausted"] = True
+        return False
+
+    if plan["sheet"].get("row_height_mode", "fixed") == "fixed":
+        _apply_fixed_dataframe_row_height_xlsxwriter(worksheet, plan["sheet"], anchor, row_idx)
+    for layout, value in zip(_anchor_layouts(anchor), row_values):
+        for col_idx, cell_schema in _layout_row_cells(
+            anchor,
+            layout,
+            row_idx=row_idx,
+            value=value,
+        ).items():
+            if col_idx < plan["min_col"] or col_idx > plan["max_col"]:
+                continue
+            _write_xlsxwriter_cell(
+                workbook,
+                worksheet,
+                row_idx - 1,
+                col_idx - 1,
+                cell_schema,
+                plan.get("theme_colors"),
+            )
+        merge_range = _layout_merge_range(anchor, layout, row_idx)
+        if merge_range is not None:
+            _add_xlsxwriter_cell_range_merge(worksheet, merge_range)
+    return True
+
+
+def _apply_fixed_dataframe_row_height_xlsxwriter(
+    worksheet,
+    schema: SheetSchema,
+    anchor: dict[str, Any],
+    row_idx: int,
+) -> None:
+    if schema.get("row_height_mode", "fixed") != "fixed":
+        return
+    if str(row_idx) in schema.get("row_heights", {}):
+        return
+    height = schema.get("row_heights", {}).get(str(anchor["start_row"]))
+    if height is not None:
+        worksheet.set_row(row_idx - 1, height)
+
+
+def _write_xlsxwriter_repeat_sheet(
+    workbook,
+    worksheet,
+    plan: dict[str, Any],
+    max_rows_per_workbook: int,
+) -> bool:
+    wrote_any = False
+    row_idx = 1
+    written_rows = 0
+    while row_idx <= max_rows_per_workbook:
+        try:
+            row_item = next(plan["repeat_rows"])
+        except StopIteration:
+            plan["content"]["exhausted"] = True
+            break
+        _write_xlsxwriter_row(
+            workbook,
+            worksheet,
+            row_idx,
+            row_item,
+            plan.get("theme_colors"),
+        )
+        wrote_any = True
+        written_rows += 1
+        row_idx += 1
+    _apply_xlsxwriter_page_breaks(worksheet, plan["sheet"], written_rows)
+    return wrote_any
+
+
+def _apply_xlsxwriter_page_breaks(
+    worksheet,
+    schema: SheetSchema,
+    written_rows: int,
+) -> None:
+    worksheet.set_h_pagebreaks(_row_page_breaks_for_written_rows(schema, written_rows))
+    worksheet.set_v_pagebreaks(
+        schema.get(
+            "resolved_column_page_breaks",
+            schema.get("column_page_breaks", []),
+        )
+        or []
+    )
+
+
+def _row_page_breaks_for_written_rows(
+    schema: SheetSchema,
+    written_rows: int,
+) -> list[int]:
+    return [
+        break_idx
+        for break_idx in schema.get(
+            "resolved_row_page_breaks",
+            schema.get("row_page_breaks", []),
+        )
+        if break_idx < written_rows
+    ]
+
+
+def _write_xlsxwriter_row(
+    workbook,
+    worksheet,
+    row_idx: int,
+    row_item: dict[str, Any],
+    theme_colors: list[str] | None,
+) -> None:
+    row_zero = row_idx - 1
+    row_map = row_item["cells"]
+    for col_idx, schema in row_map.items():
+        _write_xlsxwriter_cell(
+            workbook,
+            worksheet,
+            row_zero,
+            col_idx - 1,
+            schema,
+            theme_colors,
+        )
+    for merge in row_item.get("merges", []):
+        max_merge_row = row_idx + merge["max_row_offset"] - merge["min_row_offset"]
+        first_col = int(merge["min_col"])
+        last_col = int(merge["max_col"])
+        _add_xlsxwriter_merge(
+            worksheet,
+            row_zero,
+            first_col - 1,
+            max_merge_row - 1,
+            last_col - 1,
+        )
+
+
+def _add_xlsxwriter_merge(
+    worksheet,
+    first_row: int,
+    first_col: int,
+    last_row: int,
+    last_col: int,
+) -> None:
+    from xlsxwriter.utility import xl_range
+
+    cell_range = xl_range(first_row, first_col, last_row, last_col)
+    worksheet.merge.append([first_row, first_col, last_row, last_col])
+    for row_idx in range(first_row, last_row + 1):
+        for col_idx in range(first_col, last_col + 1):
+            worksheet.merged_cells[(row_idx, col_idx)] = cell_range
+
+
+def _add_xlsxwriter_cell_range_merge(worksheet, merge_range: CellRange) -> None:
+    _add_xlsxwriter_merge(
+        worksheet,
+        merge_range.min_row - 1,
+        merge_range.min_col - 1,
+        merge_range.max_row - 1,
+        merge_range.max_col - 1,
+    )
+
+
+def _write_xlsxwriter_cell(
+    workbook,
+    worksheet,
+    row: int,
+    col: int,
+    schema: CellSchema,
+    theme_colors: list[str] | None,
+) -> None:
+    fmt = _xlsxwriter_format(workbook, schema, theme_colors)
+    value = _xlsxwriter_value(schema)
+    if schema.get("cell_type") == "formula":
+        raise ValueError(
+            "XlsxWriter streaming export does not support formula cells. Use streaming_engine='openpyxl'."
+        )
+    if value is None:
+        worksheet.write_blank(row, col, None, fmt)
+    else:
+        worksheet.write(row, col, value, fmt)
+
+
+def _xlsxwriter_value(schema: CellSchema | None) -> Any:
+    if schema is None:
+        return None
+    value = schema["value"]
+    if schema["cell_type"] == "date" and isinstance(value, str):
+        return datetime.datetime.fromisoformat(value)
+    return value
+
+
+def _xlsxwriter_format(
+    workbook,
+    schema: CellSchema | None,
+    theme_colors: list[str] | None,
+):
+    if schema is None:
+        return None
+    cache = getattr(workbook, "_mindoff_format_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(workbook, "_mindoff_format_cache", cache)
+    key = _style_cache_key(schema)
+    fmt = cache.get(key)
+    if fmt is None:
+        fmt = workbook.add_format(_xlsxwriter_format_props(schema, theme_colors))
+        cache[key] = fmt
+    return fmt
+
+
+def _xlsxwriter_format_props(
+    schema: CellSchema,
+    theme_colors: list[str] | None = None,
+) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    font = schema["font"]
+    if font.get("name"):
+        props["font_name"] = font["name"]
+    if font.get("size"):
+        props["font_size"] = font["size"]
+    if font.get("bold"):
+        props["bold"] = True
+    if font.get("italic"):
+        props["italic"] = True
+    if font.get("underline"):
+        props["underline"] = True
+    if font.get("strike"):
+        props["font_strikeout"] = True
+    if font.get("vert_align") == "superscript":
+        props["font_script"] = 1
+    elif font.get("vert_align") == "subscript":
+        props["font_script"] = 2
+    if font.get("color"):
+        color = _xlsxwriter_color(font["color"], theme_colors)
+        if color is not None:
+            props["font_color"] = color
+
+    fill = schema["fill"]
+    pattern_type = fill.get("pattern_type") or (fill.get("bg_color") and "solid")
+    if pattern_type:
+        fill_color = _xlsxwriter_color(
+            fill.get("fg_color") or fill.get("bg_color"),
+            theme_colors,
+        )
+        pattern_color = _xlsxwriter_color(fill.get("bg_color"), theme_colors)
+        if fill_color is None and pattern_color is None:
+            pattern_type = None
+    if pattern_type:
+        pattern = _xlsxwriter_pattern(pattern_type)
+        if pattern is not None:
+            props["pattern"] = pattern
+        if fill_color is not None:
+            props["bg_color"] = fill_color
+        if pattern_color is not None and pattern_type != "solid":
+            props["fg_color"] = fill_color
+            props["bg_color"] = pattern_color
+
+    alignment = schema["alignment"]
+    if alignment.get("horizontal"):
+        props["align"] = alignment["horizontal"]
+    if alignment.get("vertical"):
+        props["valign"] = alignment["vertical"]
+    if alignment.get("wrap_text"):
+        props["text_wrap"] = True
+    if alignment.get("indent") is not None:
+        props["indent"] = alignment["indent"]
+    if alignment.get("shrink_to_fit"):
+        props["shrink"] = True
+    if alignment.get("text_rotation") is not None:
+        props["rotation"] = alignment["text_rotation"]
+    if alignment.get("reading_order") is not None:
+        props["reading_order"] = alignment["reading_order"]
+
+    _xlsxwriter_border_props(props, schema["borders"], alignment, theme_colors)
+    if schema.get("number_format"):
+        props["num_format"] = schema["number_format"]
+    return props
+
+
+def _xlsxwriter_pattern(pattern_type: str | None) -> int | None:
+    return {
+        "solid": 1,
+        "darkGray": 2,
+        "mediumGray": 3,
+        "lightGray": 4,
+        "gray125": 17,
+    }.get(pattern_type)
+
+
+def _xlsxwriter_border_props(
+    props: dict[str, Any],
+    borders: dict[str, Any],
+    alignment: dict[str, Any],
+    theme_colors: list[str] | None,
+) -> None:
+    for side in ("top", "bottom", "left", "right"):
+        data = borders.get(side) or {}
+        style = _xlsxwriter_border_style(data.get("style"))
+        if style is None:
+            continue
+        props[side] = style
+        if data.get("color"):
+            color = _xlsxwriter_color(data["color"], theme_colors)
+            if color is not None:
+                props[f"{side}_color"] = color
+    for logical_side, physical_side in _xlsxwriter_logical_border_sides(alignment).items():
+        data = borders.get(logical_side) or {}
+        style = _xlsxwriter_border_style(data.get("style"))
+        if style is None:
+            continue
+        props[physical_side] = style
+        if data.get("color"):
+            color = _xlsxwriter_color(data["color"], theme_colors)
+            if color is not None:
+                props[f"{physical_side}_color"] = color
+    diagonal = borders.get("diagonal") or {}
+    diagonal_style = _xlsxwriter_border_style(diagonal.get("style"))
+    if diagonal_style is not None:
+        props["diag_border"] = diagonal_style
+        if diagonal.get("color"):
+            color = _xlsxwriter_color(diagonal["color"], theme_colors)
+            if color is not None:
+                props["diag_color"] = color
+    if borders.get("diagonal_up") and borders.get("diagonal_down"):
+        props["diag_type"] = 3
+    elif borders.get("diagonal_up"):
+        props["diag_type"] = 2
+    elif borders.get("diagonal_down"):
+        props["diag_type"] = 1
+
+
+def _xlsxwriter_logical_border_sides(alignment: dict[str, Any]) -> dict[str, str]:
+    if alignment.get("reading_order") == 2:
+        return {"start": "right", "end": "left"}
+    return {"start": "left", "end": "right"}
+
+
+def _xlsxwriter_border_style(style: str | None) -> int | None:
+    return {
+        "hair": 7,
+        "thin": 1,
+        "medium": 2,
+        "thick": 5,
+        "dashed": 3,
+        "dotted": 4,
+        "double": 6,
+    }.get(style)
+
+
+def _xlsxwriter_color(
+    value: str | None,
+    theme_colors: list[str] | None = None,
+) -> str | None:
+    if not value:
+        return None
+    resolved = resolve_theme_color(value, theme_colors)
+    if resolved is None:
+        return None
+    raw = resolved[-6:]
+    return f"#{raw}" if len(raw) == 6 else None
+
+
 def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
     max_col = current
     for section in sheet.get("repeat_sections", []):
+        if section.get("record_source"):
+            for item in section.get("record_bindings", []):
+                max_col = max(max_col, item["start_col"])
+            for anchor in section.get("dataframe_anchors", []):
+                max_col = max(
+                    max_col,
+                    anchor["start_col"] + max(_occupied_width(anchor) - 1, 0),
+                )
+            continue
         for record in section["records"]:
             for item in record["cells"]:
                 max_col = max(max_col, item["start_col"])
@@ -624,13 +1175,26 @@ def _repeat_row_stream(
             item["row_idx"] = output_row
             yield item
             output_row += 1
-        for record in section["records"]:
+        records = (
+            _source_repeat_records(bundle, source_map, section, streaming_chunk_rows)
+            if section.get("record_source")
+            else section["records"]
+        )
+        for record in records:
+            block_height = record.get(
+                "block_height",
+                section.get("record_block_height", section["block_height"]),
+            )
+            merges = record.get(
+                "merged_regions",
+                section.get("merged_record_regions", section.get("merged_regions", [])),
+            )
             for row_item in _repeat_record_rows(
                 bundle,
                 source_map,
                 record,
-                block_height=record.get("block_height", section["block_height"]),
-                merges=record.get("merged_regions", section.get("merged_regions", [])),
+                block_height=block_height,
+                merges=merges,
                 cell_templates=section.get("cell_templates"),
                 batch_size=streaming_chunk_rows,
             ):
@@ -644,6 +1208,70 @@ def _repeat_row_stream(
         item["row_idx"] = output_row
         yield item
         output_row += 1
+
+
+def _source_repeat_records(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    section: dict[str, Any],
+    streaming_chunk_rows: int,
+) -> Iterator[dict[str, Any]]:
+    source = source_map[section["record_source"]]
+    constants = section.get("constants", {})
+    for index, row in enumerate(
+        _source_dict_rows(bundle, source, batch_size=streaming_chunk_rows)
+    ):
+        payload = {**constants, **row}
+        yield {
+            "index": index,
+            "block_height": section.get("record_block_height", section["block_height"]),
+            "cells": [
+                _source_repeat_binding(binding, payload)
+                for binding in section.get("record_bindings", [])
+            ],
+            "dataframe_anchors": section.get("dataframe_anchors", []),
+            "merged_regions": section.get(
+                "merged_record_regions",
+                section.get("merged_regions", []),
+            ),
+        }
+
+
+def _source_repeat_binding(
+    binding: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    result = {
+        "row_offset": binding["row_offset"],
+        "start_col": binding["start_col"],
+        "cell_template": binding["cell_template"],
+    }
+    if "value_template" not in binding:
+        value = binding.get("value")
+    else:
+        value = _resolve_repeat_binding_value(binding, payload)
+    result["value"] = value
+    result["cell_type"] = _infer_cell_type(value)
+    return result
+
+
+def _resolve_repeat_binding_value(
+    binding: dict[str, Any], payload: dict[str, Any]
+) -> Any:
+    value_template = binding.get("value_template")
+    if not isinstance(value_template, str):
+        return value_template
+    if binding.get("full_scalar") and binding.get("scalar_keys"):
+        return payload.get(binding["scalar_keys"][0])
+
+    def replacer(match) -> str:
+        key = match.group(1)
+        if key not in payload:
+            return match.group(0)
+        return str(payload[key])
+
+    from .template_contract import PLACEHOLDER_RE
+
+    return PLACEHOLDER_RE.sub(replacer, value_template)
 
 
 def _static_repeat_rows(
@@ -692,6 +1320,9 @@ def _repeat_record_rows(
     cell_templates: list[CellSchema] | None = None,
     batch_size: int,
 ) -> Iterator[dict[str, Any]]:
+    if cell_templates is not None:
+        for template in cell_templates:
+            _style_cache_key(template)
     cells_by_offset: dict[int, dict[int, CellSchema]] = {}
     for item in record["cells"]:
         cell = _repeat_item_cell(item, cell_templates)
@@ -794,6 +1425,7 @@ def _apply_repeat_merge_edge_cells(
                 )
                 if border_schema is not None:
                     edge_cell["borders"] = border_schema
+                    edge_cell.pop("__style_key", None)
                 cells_by_offset.setdefault(row_offset, {})[col_idx] = edge_cell  # type: ignore[assignment]
 
 
@@ -820,7 +1452,7 @@ def _repeat_content_rows(
     source = source_map[anchor["source"]]
     layouts = _anchor_layouts(anchor)
     wrote = False
-    for row_values in _source_rows(bundle, source, batch_size=batch_size):
+    for row_values in _cached_source_rows(bundle, source, batch_size=batch_size):
         row_cells = dict(base_cells) if not wrote else {}
         for layout, value in zip(layouts, row_values):
             row_cells.update(
@@ -864,7 +1496,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
         for col_idx in range(plan["min_col"], max_col + 1):
             static = plan["static"].get((row_idx, col_idx))
             if static is not None:
-                row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, static)
+                row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, static, plan.get("theme_colors"))
         for merge_range in plan.get("generated_merges", {}).get(row_idx, []):
             _add_generated_merge(ws, merge_range)
         if anchor is not None and row_idx >= anchor["start_row"]:
@@ -935,7 +1567,7 @@ def _write_repeat_streaming_sheet(
         for col_idx, schema in row_map.items():
             if col_idx < plan["min_col"] or col_idx > max_col:
                 continue
-            row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, schema)
+            row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, schema, plan.get("theme_colors"))
         ws.append(row_cells)
         wrote_any = True
         written_rows += 1
@@ -988,6 +1620,7 @@ def _fill_streaming_row(
                 ws,
                 cell_schema,
                 cell_schema["value"],
+                plan.get("theme_colors"),
             )
         merge_range = _layout_merge_range(anchor, layout, row_idx)
         if merge_range is not None:
@@ -1011,20 +1644,29 @@ def _layout_row_cells(
         first["cell_type"] = _infer_cell_type(value)
         return {start_col: first}  # type: ignore[return-value]
 
-    merge_range = _layout_merge_range(anchor, layout, row_idx)
-    if merge_range is None:
-        first = dict(schema)
-        first["value"] = value
-        first["cell_type"] = _infer_cell_type(value)
-        return {start_col: first}  # type: ignore[return-value]
-
     result: dict[int, CellSchema] = {}
     end_col = start_col + occupation - 1
+    edge_style_keys = layout.setdefault("__edge_style_keys", {})
     for col_idx in range(start_col, end_col + 1):
         item = dict(schema)
-        border_schema = _edge_border_schema(item["borders"], merge_range, row_idx, col_idx)
+        border_schema = _edge_border_schema_bounds(
+            item["borders"],
+            min_row=row_idx,
+            max_row=row_idx,
+            min_col=start_col,
+            max_col=end_col,
+            row=row_idx,
+            col=col_idx,
+        )
         if border_schema is not None:
             item["borders"] = border_schema
+            style_key = edge_style_keys.get(col_idx - start_col)
+            if style_key is None:
+                item.pop("__style_key", None)
+                style_key = _style_cache_key(item)
+                edge_style_keys[col_idx - start_col] = style_key
+            else:
+                item["__style_key"] = style_key
         if col_idx == start_col:
             item["value"] = value
             item["cell_type"] = _infer_cell_type(value)
@@ -1036,13 +1678,34 @@ def _layout_row_cells(
 
 
 def _cell_with_layout(schema: CellSchema, layout: dict[str, Any]) -> CellSchema:
+    cache = layout.get("__cell_schema_cache")
+    if cache is not None:
+        return cache
     result = dict(schema)
     result["alignment"] = _layout_alignment(schema, layout)
+    _style_cache_key(result)
+    layout["__cell_schema_cache"] = result
     return result  # type: ignore[return-value]
 
 
 def _style_cache_key(schema: dict[str, Any]) -> str:
-    return json.dumps(schema, sort_keys=True, separators=(",", ":"), default=str)
+    cached = schema.get("__style_key")
+    if cached is not None:
+        return cached
+    key = json.dumps(
+        {
+            "font": schema["font"],
+            "fill": schema["fill"],
+            "alignment": schema["alignment"],
+            "borders": schema["borders"],
+            "number_format": schema["number_format"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    schema["__style_key"] = key
+    return key
 
 
 def _cached_style(ws, kind: str, schema: dict[str, Any], builder):
@@ -1051,7 +1714,7 @@ def _cached_style(ws, kind: str, schema: dict[str, Any], builder):
         cache = {"font": {}, "fill": {}, "alignment": {}, "border": {}}
         setattr(ws, "_mindoff_style_cache", cache)
     kind_cache = cache[kind]
-    key = _style_cache_key(schema)
+    key = json.dumps(schema, sort_keys=True, separators=(",", ":"), default=str)
     style = kind_cache.get(key)
     if style is None:
         style = builder(schema)
@@ -1059,46 +1722,76 @@ def _cached_style(ws, kind: str, schema: dict[str, Any], builder):
     return style
 
 
-def _cached_style_array(ws, schema: CellSchema):
+def _resolve_color_field(value: str | None, theme_colors: list[str] | None) -> str | None:
+    if value is None or theme_colors is None or not value.startswith("theme:"):
+        return value
+    return resolve_theme_color(value, theme_colors)
+
+
+def _resolved_fill(fill: dict[str, Any], theme_colors: list[str] | None) -> dict[str, Any]:
+    if theme_colors is None:
+        return fill
+    result = dict(fill)
+    for key in ("fg_color", "bg_color"):
+        if result.get(key):
+            result[key] = _resolve_color_field(result[key], theme_colors)
+    return result
+
+
+def _resolved_font(font: dict[str, Any], theme_colors: list[str] | None) -> dict[str, Any]:
+    if theme_colors is None or not font.get("color"):
+        return font
+    result = dict(font)
+    result["color"] = _resolve_color_field(result["color"], theme_colors)
+    return result
+
+
+def _resolved_borders(borders: dict[str, Any], theme_colors: list[str] | None) -> dict[str, Any]:
+    if theme_colors is None:
+        return borders
+    result = {}
+    for key, side in borders.items():
+        if isinstance(side, dict) and side.get("color"):
+            side = dict(side)
+            side["color"] = _resolve_color_field(side["color"], theme_colors)
+        result[key] = side
+    return result
+
+
+def _cached_style_array(ws, schema: CellSchema, theme_colors: list[str] | None = None):
     cache = getattr(ws, "_mindoff_style_array_cache", None)
     if cache is None:
         cache = {}
         setattr(ws, "_mindoff_style_array_cache", cache)
-    key = _style_cache_key(
-        {
-            "font": schema["font"],
-            "fill": schema["fill"],
-            "alignment": schema["alignment"],
-            "borders": schema["borders"],
-            "number_format": schema["number_format"],
-        }
-    )
+    key = _style_cache_key(schema)
     style_array = cache.get(key)
     if style_array is not None:
         return style_array
 
     prototype = WriteOnlyCell(ws, value=None)
-    prototype.font = _cached_style(ws, "font", schema["font"], _build_font)
-    prototype.fill = _cached_style(ws, "fill", schema["fill"], _build_fill)
+    prototype.font = _cached_style(ws, "font", _resolved_font(schema["font"], theme_colors), _build_font)
+    prototype.fill = _cached_style(ws, "fill", _resolved_fill(schema["fill"], theme_colors), _build_fill)
     prototype.alignment = _cached_style(ws, "alignment", schema["alignment"], _build_alignment)
-    prototype.border = _cached_style(ws, "border", schema["borders"], _build_border)
+    prototype.border = _cached_style(ws, "border", _resolved_borders(schema["borders"], theme_colors), _build_border)
     if schema["number_format"]:
         prototype.number_format = schema["number_format"]
     cache[key] = copy(prototype._style)
     return cache[key]
 
 
-def _styled_write_only_cell(ws, schema: CellSchema, value: Any) -> WriteOnlyCell:
+def _styled_write_only_cell(
+    ws, schema: CellSchema, value: Any, theme_colors: list[str] | None = None
+) -> WriteOnlyCell:
     cell = WriteOnlyCell(ws, value=value)
-    cell._style = copy(_cached_style_array(ws, schema))
+    cell._style = _cached_style_array(ws, schema, theme_colors)
     return cell
 
 
-def _write_only_cell(ws, schema: CellSchema) -> WriteOnlyCell:
+def _write_only_cell(ws, schema: CellSchema, theme_colors: list[str] | None = None) -> WriteOnlyCell:
     value = schema["value"]
     if schema["cell_type"] == "date" and isinstance(value, str):
         value = datetime.datetime.fromisoformat(value)
-    cell = _styled_write_only_cell(ws, schema, value)
+    cell = _styled_write_only_cell(ws, schema, value, theme_colors)
     return cell
 
 
@@ -1165,6 +1858,27 @@ def _edge_border(
 def _edge_border_schema(
     borders: dict[str, Any], cell_range: CellRange, row: int, col: int
 ) -> dict[str, Any] | None:
+    return _edge_border_schema_bounds(
+        borders,
+        min_row=cell_range.min_row,
+        max_row=cell_range.max_row,
+        min_col=cell_range.min_col,
+        max_col=cell_range.max_col,
+        row=row,
+        col=col,
+    )
+
+
+def _edge_border_schema_bounds(
+    borders: dict[str, Any],
+    *,
+    min_row: int,
+    max_row: int,
+    min_col: int,
+    max_col: int,
+    row: int,
+    col: int,
+) -> dict[str, Any] | None:
     empty: dict[str, Any] = {"style": None, "color": None}
     # Only materialize the visible outline for synthesized merged cells.
     # Writing interior horizontal/vertical merge borders onto every cell can
@@ -1183,14 +1897,14 @@ def _edge_border_schema(
         "diagonal_down": borders.get("diagonal_down", False),
         "outline": borders.get("outline", True),
     }
-    if row == cell_range.min_row:
+    if row == min_row:
         result["top"] = dict(borders["top"])
-    if row == cell_range.max_row:
+    if row == max_row:
         result["bottom"] = dict(borders["bottom"])
-    if col == cell_range.min_col:
+    if col == min_col:
         result["left"] = dict(borders["left"])
         result["start"] = dict(borders.get("start", empty))
-    if col == cell_range.max_col:
+    if col == max_col:
         result["right"] = dict(borders["right"])
         result["end"] = dict(borders.get("end", empty))
 
@@ -1206,7 +1920,7 @@ def _apply_streaming_merges(ws, schema: SheetSchema) -> None:
         ws.merged_cells.add(CellRange(region))
 
 
-def _add_generated_merge(ws, merge_range: CellRange) -> None:
+def _add_generated_merge(ws, merge_range: CellRange | str) -> None:
     # Renderer-generated occupation merges are validated by construction and are
     # one row tall, so avoid openpyxl's O(n) overlap scan for every streamed row.
     ws.merged_cells.ranges.add(merge_range)
@@ -1283,6 +1997,7 @@ def export_report_bundle(
     row_height_mode: str | None = None,
     default_column_width: float | None = None,
     default_row_height: float | None = None,
+    streaming_engine: str | None = None,
     streaming_chunk_rows: int = 50_000,
     max_rows_per_workbook: int = MAX_EXCEL_ROWS,
     auto_delete_bundle: bool = False,
@@ -1301,6 +2016,8 @@ def export_report_bundle(
     bundle = _coerce_bundle(bundle_or_path)
     result: None | list[str]
     if format == "pdf":
+        if streaming_engine is not None:
+            raise ValueError("PDF export does not support streaming_engine.")
         if export_mode != "fidelity":
             raise ValueError(
                 f"PDF export does not support export_mode '{export_mode}'. PDF output paginates automatically."
@@ -1322,9 +2039,15 @@ def export_report_bundle(
         )
         result = None
     elif export_mode == "streaming":
+        engine = streaming_engine or "openpyxl"
+        if engine not in {"openpyxl", "xlsxwriter"}:
+            raise ValueError(
+                f"Unsupported streaming_engine '{streaming_engine}'. Expected 'openpyxl' or 'xlsxwriter'."
+            )
         result = _render_streaming(
             bundle,
             output_path,
+            streaming_engine=engine,
             column_width_mode=column_width_mode,
             row_height_mode=row_height_mode,
             default_column_width=default_column_width,
@@ -1333,6 +2056,14 @@ def export_report_bundle(
             max_rows_per_workbook=max_rows_per_workbook,
         )
     elif export_mode == "fidelity":
+        if streaming_engine == "xlsxwriter":
+            raise ValueError(
+                "Fidelity XLSX export does not support streaming_engine='xlsxwriter'. Use export_mode='streaming'."
+            )
+        if streaming_engine not in {None, "openpyxl"}:
+            raise ValueError(
+                f"Unsupported streaming_engine '{streaming_engine}'. Expected 'openpyxl' or 'xlsxwriter'."
+            )
         _render_fidelity(
             bundle,
             output_path,

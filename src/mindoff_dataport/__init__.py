@@ -8,16 +8,19 @@ from .bundle import (
     compile_report_bundle as _compile_report_bundle_impl,
 )
 from .extractor import extract_template as _extract_template_impl
+from .repeat import RepeatRecords, repeat_records
 from .schema import WorkbookSchema
 from .template_contract import get_template_inputs as _get_template_inputs_impl
 from .xlsx_renderer import export_report_bundle as _export_report_bundle_impl
 
 __all__ = [
     "ReportBundle",
+    "RepeatRecords",
     "extract_template",
     "get_template_inputs",
     "compile_report_bundle",
     "export_report_bundle",
+    "repeat_records",
     "extract",
     "inputs",
     "compile",
@@ -82,6 +85,7 @@ mo_dataport = SimpleNamespace(
     inputs=get_template_inputs,
     compile=compile_report_bundle,
     export=export_report_bundle,
+    repeat_records=repeat_records,
 )
 
 

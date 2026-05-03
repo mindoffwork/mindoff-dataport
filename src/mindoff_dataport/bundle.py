@@ -4,10 +4,12 @@ import datetime
 import json
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.utils.cell import (
@@ -29,10 +31,12 @@ from .template_contract import (
     get_template_inputs,
 )
 from .page_breaks import resolve_compiled_sheet_page_breaks
+from .repeat import RepeatRecords, is_repeat_records
 from .schema import CellSchema, SheetSchema, WorkbookSchema
 
 __all__ = [
     "ReportBundle",
+    "RepeatRecords",
     "compile_report_bundle",
     "load_report_bundle",
 ]
@@ -155,6 +159,77 @@ def _write_dataframe_source(
         "file_backed": True,
     }
     return record
+
+
+def _write_repeat_record_source(
+    *, value: Any, source_id: str, bundle_dir: Path
+) -> dict[str, Any]:
+    rel_path = f"data/{source_id}.parquet"
+    output_path = bundle_dir / rel_path
+    module = getattr(type(value), "__module__", "") or ""
+    qualname = type(value).__qualname__
+
+    if "polars" in module and qualname == "LazyFrame":
+        value.sink_parquet(output_path)
+    elif "polars" in module and qualname == "DataFrame":
+        value.write_parquet(output_path)
+    elif isinstance(value, list):
+        try:
+            import polars as pl
+        except ImportError as exc:  # pragma: no cover - exercised only without optional dep
+            raise TypeError("repeat_records list input requires polars to be installed") from exc
+        pl.DataFrame(value).write_parquet(output_path)
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        _write_iterable_record_source(value, output_path)
+    else:
+        raise TypeError(
+            f"Expected repeat_records records as a polars DataFrame/LazyFrame or list of dicts, got {type(value).__name__}"
+        )
+
+    columns, row_count = _parquet_metadata(output_path)
+    return {
+        "id": source_id,
+        "path": rel_path,
+        "format": "parquet",
+        "columns": columns,
+        "rows": row_count,
+        "file_backed": True,
+        "repeat_records": True,
+    }
+
+
+def _write_iterable_record_source(value: Iterable[Any], output_path: Path) -> None:
+    writer: pq.ParquetWriter | None = None
+    batch: list[dict[str, Any]] = []
+    try:
+        for item in value:
+            if not isinstance(item, dict):
+                raise TypeError(
+                    f"repeat_records iterable items must be dicts, got {type(item).__name__}"
+                )
+            batch.append(item)
+            if len(batch) >= 10_000:
+                writer = _write_record_batch(batch, output_path, writer)
+                batch = []
+        if batch:
+            writer = _write_record_batch(batch, output_path, writer)
+        if writer is None:
+            pq.write_table(pa.Table.from_pylist([]), output_path)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+def _write_record_batch(
+    batch: list[dict[str, Any]],
+    output_path: Path,
+    writer: pq.ParquetWriter | None,
+) -> pq.ParquetWriter:
+    table = pa.Table.from_pylist(batch)
+    if writer is None:
+        writer = pq.ParquetWriter(output_path, table.schema)
+    writer.write_table(table)
+    return writer
 
 
 def _schema_value(value: Any) -> Any:
@@ -399,6 +474,19 @@ def _compile_repeat_section(
 ) -> tuple[dict[str, Any], int]:
     repeat_key = repeat["key"]
     records = sheet_data[repeat_key]
+    if is_repeat_records(records):
+        return _compile_source_repeat_section(
+            sheet=sheet,
+            repeat=repeat,
+            output_name=output_name,
+            repeat_records=records,
+            bundle_dir=bundle_dir,
+            data_sources=data_sources,
+            used_ids=used_ids,
+            source_cache=source_cache,
+            dataframe_options=dataframe_options,
+            dataframe_shift=dataframe_shift,
+        )
     block_start = repeat["start_row"] + 1
     block_end = repeat["end_row"] - 1
     repeat_merges = _repeat_merged_regions(sheet, repeat, block_start, block_end)
@@ -481,6 +569,200 @@ def _compile_repeat_section(
         }
     _validate_repeat_merges_do_not_overlap_dataframes(section)
     return section, max_col
+
+
+def _compile_source_repeat_section(
+    *,
+    sheet: SheetSchema,
+    repeat: dict[str, Any],
+    output_name: str,
+    repeat_records: RepeatRecords,
+    bundle_dir: Path,
+    data_sources: list[dict[str, Any]],
+    used_ids: set[str],
+    source_cache: dict[int, dict[str, Any]],
+    dataframe_options: dict[str, Any],
+    dataframe_shift: str,
+) -> tuple[dict[str, Any], int]:
+    repeat_key = repeat["key"]
+    block_start = repeat["start_row"] + 1
+    block_end = repeat["end_row"] - 1
+    repeat_merges = _repeat_merged_regions(sheet, repeat, block_start, block_end)
+    block_height = max(block_end - block_start + 1, 0)
+    max_col = _parse_dims(sheet["dimensions"])[2]
+
+    record_source_id = _unique_id(used_ids, f"{output_name}__{repeat_key}__records")
+    record_source = _write_repeat_record_source(
+        value=repeat_records.records,
+        source_id=record_source_id,
+        bundle_dir=bundle_dir,
+    )
+    data_sources.append(record_source)
+    record_columns = set(record_source["columns"])
+    constants = repeat_records.constants
+
+    record_cells: list[dict[str, Any]] = []
+    record_anchors: list[dict[str, Any]] = []
+    for coord, cell in sheet["cells"].items():
+        row_idx, col_idx = _coord_indexes(coord)
+        if row_idx < block_start or row_idx > block_end:
+            continue
+        if _is_non_anchor_merged_cell(cell):
+            continue
+        compiled = _compile_source_repeat_cell(
+            cell=cell,
+            constants=constants,
+            record_columns=record_columns,
+            output_name=output_name,
+            repeat_key=repeat_key,
+            bundle_dir=bundle_dir,
+            data_sources=data_sources,
+            used_ids=used_ids,
+            source_cache=source_cache,
+            sheet_dataframe_options=dataframe_options.get(output_name, {}),
+        )
+        row_offset = row_idx - block_start
+        for item in compiled["cells"]:
+            item["row_offset"] = row_offset
+            item["start_col"] = col_idx
+            record_cells.append(item)
+        for anchor in compiled["anchors"]:
+            anchor = dict(anchor)
+            anchor["start_row_offset"] = anchor.pop("start_row") - block_start
+            record_anchors.append(anchor)
+            max_col = max(
+                max_col,
+                anchor["start_col"] + max(_occupied_width(anchor["column_layouts"]) - 1, 0),
+            )
+
+    shifted_cells, record_anchors, record_merges, record_block_height = (
+        _shift_repeat_record_content_around_dataframes(
+            record_cells,
+            record_anchors,
+            repeat_merges,
+            block_height=block_height,
+            dataframe_shift=dataframe_shift,
+        )
+    )
+    cell_templates = _compact_source_repeat_cells(shifted_cells)
+    for anchor in record_anchors:
+        output_range = _repeat_dataframe_output_range(anchor)
+        if output_range is not None:
+            max_col = max(max_col, output_range.max_col)
+    section = {
+        "key": repeat_key,
+        "start_row": repeat["start_row"],
+        "end_row": repeat["end_row"],
+        "template_start_row": block_start,
+        "template_end_row": block_end,
+        "block_height": block_height,
+        "record_block_height": record_block_height,
+        "record_count": record_source["rows"],
+        "record_source": record_source["path"],
+        "record_source_format": record_source["format"],
+        "record_columns": record_source["columns"],
+        "constants": {
+            key: _schema_value(value)
+            for key, value in constants.items()
+            if not _is_dataframe_like(value)
+        },
+        "merged_regions": repeat_merges,
+        "cell_templates": cell_templates,
+        "record_bindings": shifted_cells,
+        "dataframe_anchors": record_anchors,
+        "merged_record_regions": record_merges,
+    }
+    _validate_repeat_merges_do_not_overlap_dataframes(section)
+    return section, max_col
+
+
+def _compile_source_repeat_cell(
+    *,
+    cell: CellSchema,
+    constants: dict[str, Any],
+    record_columns: set[str],
+    output_name: str,
+    repeat_key: str,
+    bundle_dir: Path,
+    data_sources: list[dict[str, Any]],
+    used_ids: set[str],
+    source_cache: dict[int, dict[str, Any]],
+    sheet_dataframe_options: dict[str, Any],
+) -> dict[str, Any]:
+    value = cell.get("value")
+    if not isinstance(value, str):
+        return {"cells": [{"cell": cell, "value": _schema_value(value)}], "anchors": []}
+
+    full_match = PLACEHOLDER_RE.fullmatch(value.strip())
+    if full_match and full_match.group(2) in _DATAFRAME_TYPES:
+        key = full_match.group(1)
+        if key not in constants:
+            raise KeyError(
+                f"Repeat section '{repeat_key}' requires dataframe '{key}' as a repeat_records constant"
+            )
+        anchor_type = full_match.group(2)
+        row_idx, col_idx = _coord_indexes(cell["coordinate"])
+        return {
+            "cells": [],
+            "anchors": _compile_dataframe_anchors(
+                key=key,
+                anchor_type=anchor_type,
+                cell=cell,
+                row_idx=row_idx,
+                col_idx=col_idx,
+                value=constants[key],
+                output_name=f"{output_name}__{repeat_key}__constant",
+                bundle_dir=bundle_dir,
+                data_sources=data_sources,
+                used_ids=used_ids,
+                source_cache=source_cache,
+                sheet_dataframe_options=sheet_dataframe_options,
+            ),
+        }
+
+    keys = [
+        match.group(1)
+        for match in PLACEHOLDER_RE.finditer(value)
+        if match.group(2) in _SCALAR_TYPES
+    ]
+    missing = [key for key in keys if key not in record_columns and key not in constants]
+    if missing:
+        raise KeyError(
+            f"Repeat section '{repeat_key}' requires scalar column '{missing[0]}' in repeat_records"
+        )
+    return {
+        "cells": [
+            {
+                "cell": cell,
+                "value_template": value,
+                "scalar_keys": keys,
+                "full_scalar": bool(full_match and full_match.group(2) in _SCALAR_TYPES),
+            }
+        ],
+        "anchors": [],
+    }
+
+
+def _is_dataframe_like(value: Any) -> bool:
+    module = getattr(type(value), "__module__", "") or ""
+    qualname = type(value).__qualname__
+    return "polars" in module and qualname in {"DataFrame", "LazyFrame"}
+
+
+def _compact_source_repeat_cells(cells: list[dict[str, Any]]) -> list[CellSchema]:
+    templates: list[CellSchema] = []
+    template_ids: dict[str, int] = {}
+    for item in cells:
+        cell = item.pop("cell")
+        template = _repeat_cell_template(cell)
+        key = json.dumps(template, sort_keys=True, separators=(",", ":"), default=str)
+        template_id = template_ids.get(key)
+        if template_id is None:
+            template_id = len(templates)
+            template_ids[key] = template_id
+            templates.append(template)  # type: ignore[arg-type]
+        item["cell_template"] = template_id
+    return templates
 
 
 def _compact_repeat_record_cells(records: list[dict[str, Any]]) -> list[CellSchema]:
@@ -667,13 +949,11 @@ def _shift_repeat_record_content_around_dataframes(
             ),
         )
         shifted_cell = _shift_cell(item["cell"], row_shift, col_shift)
-        shifted_cells.append(
-            {
-                "row_offset": row_offset + row_shift,
-                "start_col": start_col + col_shift,
-                "cell": shifted_cell,
-            }
-        )
+        shifted_item = dict(item)
+        shifted_item["row_offset"] = row_offset + row_shift
+        shifted_item["start_col"] = start_col + col_shift
+        shifted_item["cell"] = shifted_cell
+        shifted_cells.append(shifted_item)
         max_row_offset = max(max_row_offset, row_offset + row_shift)
 
     for anchor in record_anchors:
@@ -1131,7 +1411,18 @@ def _validate_template_merges_do_not_overlap_dataframes(sheet: dict[str, Any]) -
 
 
 def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any]) -> None:
-    for record in section["records"]:
+    if section.get("record_source"):
+        record = {
+            "dataframe_anchors": section.get("dataframe_anchors", []),
+            "merged_regions": section.get(
+                "merged_record_regions",
+                section.get("merged_regions", []),
+            ),
+        }
+        records = [record]
+    else:
+        records = section["records"]
+    for record in records:
         merges = record.get("merged_regions", section.get("merged_regions", []))
         if not merges:
             continue
@@ -1242,6 +1533,8 @@ def compile_report_bundle(
     ]
 
     report = {"version": BUNDLE_VERSION, "sheets": sheets, "assets": []}
+    if template.get("theme_colors"):
+        report["theme_colors"] = template["theme_colors"]
     manifest = {
         "version": BUNDLE_VERSION,
         "bundle_format": "directory",
@@ -1264,6 +1557,8 @@ def compile_report_bundle(
         "assets": [],
         "output_capabilities": {"xlsx": True, "pdf": True, "image": False},
     }
+    if template.get("theme_colors"):
+        manifest["theme_colors"] = template["theme_colors"]
     bundle = ReportBundle(manifest=manifest, report=report, path=str(bundle_dir))
     _write_bundle_metadata(bundle)
     return bundle

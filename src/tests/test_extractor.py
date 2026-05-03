@@ -2,11 +2,15 @@ import json
 
 import openpyxl
 import pytest
-from openpyxl.styles import Border, Side
+from openpyxl.styles import Border, Color, PatternFill, Side
 from openpyxl.worksheet.pagebreak import Break
 from openpyxl.utils.cell import get_column_letter
 
 from mindoff_dataport import extract_template
+from mindoff_dataport.style_conversion import (
+    extract_theme_colors,
+    resolve_theme_color,
+)
 
 # §1. Constants & Exceptions
 
@@ -14,12 +18,34 @@ from mindoff_dataport import extract_template
 
 # §3. Private Helper Functions
 
+_CUSTOM_THEME = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Custom">
+  <a:themeElements>
+    <a:clrScheme name="Custom">
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+      <a:lt2><a:srgbClr val="EEECE1"/></a:lt2>
+      <a:dk2><a:srgbClr val="1F497D"/></a:dk2>
+      <a:accent1><a:srgbClr val="112233"/></a:accent1>
+      <a:accent2><a:srgbClr val="445566"/></a:accent2>
+      <a:accent3><a:srgbClr val="778899"/></a:accent3>
+      <a:accent4><a:srgbClr val="AABBCC"/></a:accent4>
+      <a:accent5><a:srgbClr val="DDEEFF"/></a:accent5>
+      <a:accent6><a:srgbClr val="123456"/></a:accent6>
+      <a:hlink><a:srgbClr val="0000FF"/></a:hlink>
+      <a:folHlink><a:srgbClr val="800080"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"""
+
 # §4. Public Functions
 
 
 def test_extract_returns_workbook_schema(workbook_schema):
     assert "sheets" in workbook_schema
     assert len(workbook_schema["sheets"]) >= 1
+    assert "theme_colors" in workbook_schema
+    assert len(workbook_schema["theme_colors"]) >= 10
 
 
 def test_sheet_has_required_keys(workbook_schema):
@@ -119,6 +145,35 @@ def test_fill_pattern_type_captured(workbook_schema):
     assert fill["pattern_type"] == "gray125"
     assert fill["fg_color"] is not None
     assert fill["bg_color"] is not None
+
+
+def test_extract_theme_colors_from_custom_workbook(managed_tmp_dir):
+    workbook = openpyxl.Workbook()
+    workbook.loaded_theme = _CUSTOM_THEME
+    sheet = workbook.active
+    sheet["A1"].value = "Theme"
+    sheet["A1"].fill = PatternFill(
+        patternType="solid",
+        fgColor=Color(theme=4, tint=0.5),
+    )
+    path = managed_tmp_dir / "theme.xlsx"
+    workbook.save(path)
+
+    schema = extract_template(str(path))
+
+    assert schema["theme_colors"][4] == "FF112233"
+    fill = schema["sheets"][0]["cells"]["A1"]["fill"]
+    assert fill["fg_color"] == "theme:4:0.5"
+
+
+def test_resolve_theme_color_uses_palette_and_tint():
+    palette = extract_theme_colors(_CUSTOM_THEME)
+
+    assert resolve_theme_color("theme:4:0.0", palette) == "FF112233"
+    assert resolve_theme_color("theme:4:0.5", palette) == "FF889099"
+    assert resolve_theme_color("theme:4:-0.5", palette) == "FF081119"
+    assert resolve_theme_color("FFABCDEF", palette) == "FFABCDEF"
+    assert resolve_theme_color("theme:not-a-number:0", palette) is None
 
 
 def test_borders_captured(workbook_schema):

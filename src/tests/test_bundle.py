@@ -194,6 +194,44 @@ def test_compile_creates_compact_repeat_section_bundle(managed_tmp_dir: Path):
     assert len(bundle.manifest["dataframe_sources"]) == 1
 
 
+def test_compile_source_backed_repeat_keeps_records_out_of_report(
+    managed_tmp_dir: Path,
+):
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{customer_name:string}}"),
+            "A3": _cell("A3", "{{line_items:dataframe-content}}"),
+            "A4": _cell("A4", "{{reports:repeat-end}}"),
+        },
+        dims="A1:B4",
+    )
+    employees = polars.DataFrame({"customer_name": [f"Name {idx}" for idx in range(100)]})
+    rows = polars.DataFrame({"sku": ["A"], "qty": [1]})
+
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": mo_dataport.repeat_records(
+                    employees.lazy(),
+                    constants={"line_items": rows},
+                )
+            }
+        },
+        bundle_path=str(managed_tmp_dir / "bundle"),
+    )
+
+    section = bundle.report["sheets"][0]["repeat_sections"][0]
+    assert section["record_count"] == 100
+    assert section["record_source"].startswith("data/")
+    assert "records" not in section
+    assert len(section["record_bindings"]) == 1
+    assert section["record_bindings"][0]["scalar_keys"] == ["customer_name"]
+    assert len(section["dataframe_anchors"]) == 1
+    assert "Name 99" not in json.dumps(bundle.report)
+
+
 def test_compile_rejects_repeat_payload_that_is_not_list():
     schema = _schema(
         {

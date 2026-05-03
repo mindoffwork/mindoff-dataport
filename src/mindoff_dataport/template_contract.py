@@ -2,6 +2,7 @@
 
 import datetime
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from openpyxl.utils.cell import (
@@ -17,6 +18,7 @@ from .schema import (
     SheetSchema,
     WorkbookSchema,
 )
+from .repeat import is_repeat_records
 
 # §1. Constants & Exceptions
 
@@ -119,6 +121,9 @@ def _assert_dataframe(key: str, value: Any) -> None:
 def _check_repeat_payload(
     key: str, value: Any, expected: list[dict[str, str]], scope_label: str
 ) -> None:
+    if is_repeat_records(value):
+        _check_source_repeat_payload(key, value, expected, scope_label)
+        return
     if not isinstance(value, list):
         raise TypeError(
             f"Repeat section '{key}' in sheet '{scope_label}' must be a list, got {type(value).__name__}"
@@ -131,6 +136,48 @@ def _check_repeat_payload(
                 f"got {type(item).__name__}"
             )
         _validate_data(item_contract, item, f"{scope_label}.{key}[{index}]")
+
+
+def _check_source_repeat_payload(
+    key: str, value: Any, expected: list[dict[str, str]], scope_label: str
+) -> None:
+    item_contract = expected[0] if expected else {}
+    constants = getattr(value, "constants", {})
+    raw_columns = _repeat_record_columns(getattr(value, "records", None))
+    columns = set(raw_columns or [])
+    for item_key, expected_type in item_contract.items():
+        if item_key in constants:
+            _check_type(item_key, constants[item_key], expected_type)
+            continue
+        if expected_type in _DATAFRAME_TYPES:
+            raise KeyError(
+                f"Repeat section '{key}' in sheet '{scope_label}' requires dataframe '{item_key}' "
+                "as a repeat_records constant"
+            )
+        if raw_columns is not None and item_key not in columns:
+            raise KeyError(
+                f"Repeat section '{key}' in sheet '{scope_label}' requires scalar column '{item_key}' "
+                "in repeat_records"
+            )
+
+
+def _repeat_record_columns(records: Any) -> list[str] | None:
+    module = getattr(type(records), "__module__", "") or ""
+    qualname = type(records).__qualname__
+    if "polars" in module:
+        if qualname == "LazyFrame":
+            return [str(col) for col in records.collect_schema().names()]
+        if qualname == "DataFrame":
+            return [str(col) for col in records.columns]
+    if isinstance(records, list) and records and isinstance(records[0], dict):
+        return [str(key) for key in records[0]]
+    if isinstance(records, list) and not records:
+        return []
+    if isinstance(records, Iterable) and not isinstance(records, (str, bytes, dict)):
+        return None
+    raise TypeError(
+        f"Repeat section records for '{qualname}' must be a polars DataFrame/LazyFrame or iterable of dicts"
+    )
 
 
 def _merge_placeholder_types(

@@ -1155,6 +1155,15 @@ def _sheet_flowables(
 def _repeat_max_col(sheet: SheetSchema, current: int) -> int:
     max_col = current
     for section in sheet.get("repeat_sections", []):
+        if section.get("record_source"):
+            for item in section.get("record_bindings", []):
+                max_col = max(max_col, item["start_col"])
+            for anchor in section.get("dataframe_anchors", []):
+                max_col = max(
+                    max_col,
+                    anchor["start_col"] + max(_occupied_width(anchor) - 1, 0),
+                )
+            continue
         for record in section["records"]:
             for item in record["cells"]:
                 max_col = max(max_col, item["start_col"])
