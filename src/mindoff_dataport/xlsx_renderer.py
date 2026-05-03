@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
 import datetime
+import json
+from copy import copy
 import shutil
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -78,8 +80,8 @@ def _parquet_rows(
 ) -> Iterator[tuple[Any, ...]]:
     parquet_file = pq.ParquetFile(path)
     for batch in parquet_file.iter_batches(batch_size=batch_size, columns=columns):
-        for row in batch.to_pylist():
-            yield tuple(row.get(col) for col in columns)
+        column_values = [batch.column(index).to_pylist() for index in range(batch.num_columns)]
+        yield from zip(*column_values)
 
 
 def _header_cells(anchor: dict[str, Any]) -> Iterable[tuple[str, CellSchema]]:
@@ -629,6 +631,7 @@ def _repeat_row_stream(
                 record,
                 block_height=record.get("block_height", section["block_height"]),
                 merges=record.get("merged_regions", section.get("merged_regions", [])),
+                cell_templates=section.get("cell_templates"),
                 batch_size=streaming_chunk_rows,
             ):
                 item = dict(row_item)
@@ -686,11 +689,12 @@ def _repeat_record_rows(
     *,
     block_height: int,
     merges: list[dict[str, Any]] | None = None,
+    cell_templates: list[CellSchema] | None = None,
     batch_size: int,
 ) -> Iterator[dict[str, Any]]:
     cells_by_offset: dict[int, dict[int, CellSchema]] = {}
     for item in record["cells"]:
-        cell = item["cell"]
+        cell = _repeat_item_cell(item, cell_templates)
         cells_by_offset.setdefault(item["row_offset"], {})[item["start_col"]] = cell
     _apply_repeat_merge_edge_cells(cells_by_offset, merges or [])
 
@@ -733,6 +737,21 @@ def _repeat_record_rows(
         )
         anchor = content_anchors[0]
         offset += max(int(anchor.get("source_rows") or 0), 1)
+
+
+def _repeat_item_cell(
+    item: dict[str, Any], cell_templates: list[CellSchema] | None
+) -> CellSchema:
+    cell = item.get("cell")
+    if cell is not None:
+        return cell
+    if cell_templates is None:
+        raise ValueError("Compact repeat record is missing cell_templates")
+    result = dict(cell_templates[int(item["cell_template"])])
+    result["value"] = item.get("value")
+    result["cell_type"] = item.get("cell_type", "empty")
+    result["coordinate"] = f"{get_column_letter(int(item['start_col']))}{int(item['row_offset']) + 1}"
+    return result  # type: ignore[return-value]
 
 
 def _apply_repeat_merge_edge_cells(
@@ -847,7 +866,7 @@ def _write_streaming_sheet(ws, plan: dict[str, Any], max_rows_per_workbook: int)
             if static is not None:
                 row_cells[col_idx - plan["min_col"]] = _write_only_cell(ws, static)
         for merge_range in plan.get("generated_merges", {}).get(row_idx, []):
-            ws.merged_cells.add(merge_range)
+            _add_generated_merge(ws, merge_range)
         if anchor is not None and row_idx >= anchor["start_row"]:
             wrote_content = _fill_streaming_row(
                 ws, row_cells, plan, anchor, content, row_idx
@@ -903,13 +922,14 @@ def _write_repeat_streaming_sheet(
         for merge in row_item["merges"]:
             max_merge_row = row_idx + merge["max_row_offset"] - merge["min_row_offset"]
             if max_merge_row <= max_rows_per_workbook:
-                ws.merged_cells.add(
+                _add_generated_merge(
+                    ws,
                     CellRange(
                         min_col=merge["min_col"],
                         min_row=row_idx,
                         max_col=merge["max_col"],
                         max_row=max_merge_row,
-                    )
+                    ),
                 )
         row_cells = [None] * col_count
         for col_idx, schema in row_map.items():
@@ -971,7 +991,7 @@ def _fill_streaming_row(
             )
         merge_range = _layout_merge_range(anchor, layout, row_idx)
         if merge_range is not None:
-            ws.merged_cells.add(merge_range)
+            _add_generated_merge(ws, merge_range)
     return True
 
 
@@ -1021,14 +1041,56 @@ def _cell_with_layout(schema: CellSchema, layout: dict[str, Any]) -> CellSchema:
     return result  # type: ignore[return-value]
 
 
+def _style_cache_key(schema: dict[str, Any]) -> str:
+    return json.dumps(schema, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _cached_style(ws, kind: str, schema: dict[str, Any], builder):
+    cache = getattr(ws, "_mindoff_style_cache", None)
+    if cache is None:
+        cache = {"font": {}, "fill": {}, "alignment": {}, "border": {}}
+        setattr(ws, "_mindoff_style_cache", cache)
+    kind_cache = cache[kind]
+    key = _style_cache_key(schema)
+    style = kind_cache.get(key)
+    if style is None:
+        style = builder(schema)
+        kind_cache[key] = style
+    return style
+
+
+def _cached_style_array(ws, schema: CellSchema):
+    cache = getattr(ws, "_mindoff_style_array_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(ws, "_mindoff_style_array_cache", cache)
+    key = _style_cache_key(
+        {
+            "font": schema["font"],
+            "fill": schema["fill"],
+            "alignment": schema["alignment"],
+            "borders": schema["borders"],
+            "number_format": schema["number_format"],
+        }
+    )
+    style_array = cache.get(key)
+    if style_array is not None:
+        return style_array
+
+    prototype = WriteOnlyCell(ws, value=None)
+    prototype.font = _cached_style(ws, "font", schema["font"], _build_font)
+    prototype.fill = _cached_style(ws, "fill", schema["fill"], _build_fill)
+    prototype.alignment = _cached_style(ws, "alignment", schema["alignment"], _build_alignment)
+    prototype.border = _cached_style(ws, "border", schema["borders"], _build_border)
+    if schema["number_format"]:
+        prototype.number_format = schema["number_format"]
+    cache[key] = copy(prototype._style)
+    return cache[key]
+
+
 def _styled_write_only_cell(ws, schema: CellSchema, value: Any) -> WriteOnlyCell:
     cell = WriteOnlyCell(ws, value=value)
-    cell.font = _build_font(schema["font"])
-    cell.fill = _build_fill(schema["fill"])
-    cell.alignment = _build_alignment(schema["alignment"])
-    cell.border = _build_border(schema["borders"])
-    if schema["number_format"]:
-        cell.number_format = schema["number_format"]
+    cell._style = copy(_cached_style_array(ws, schema))
     return cell
 
 
@@ -1142,6 +1204,12 @@ def _edge_border_schema(
 def _apply_streaming_merges(ws, schema: SheetSchema) -> None:
     for region in schema.get("merged_regions", []):
         ws.merged_cells.add(CellRange(region))
+
+
+def _add_generated_merge(ws, merge_range: CellRange) -> None:
+    # Renderer-generated occupation merges are validated by construction and are
+    # one row tall, so avoid openpyxl's O(n) overlap scan for every streamed row.
+    ws.merged_cells.ranges.add(merge_range)
 
 
 def _apply_sheet_view(ws, schema: SheetSchema) -> None:

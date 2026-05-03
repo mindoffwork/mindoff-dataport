@@ -188,7 +188,9 @@ def test_compile_creates_compact_repeat_section_bundle(managed_tmp_dir: Path):
     section = sheet["repeat_sections"][0]
     assert section["key"] == "reports"
     assert len(section["records"]) == 2
-    assert section["records"][0]["cells"][0]["cell"]["value"] == "Acme"
+    assert section["cell_templates"]
+    assert section["records"][0]["cells"][0]["value"] == "Acme"
+    assert "cell" not in section["records"][0]["cells"][0]
     assert len(bundle.manifest["dataframe_sources"]) == 1
 
 
@@ -848,13 +850,13 @@ def test_compile_shifts_repeat_record_cells_around_dataframe_output():
 
     assert first["block_height"] == 6
     assert second["block_height"] == 5
-    assert {(item["cell"]["value"], item["row_offset"], item["start_col"]) for item in first["cells"]} == {
+    assert {(item["value"], item["row_offset"], item["start_col"]) for item in first["cells"]} == {
         ("Customer: Acme", 0, 1),
         ("North", 1, 1),
         ("Side 1", 2, 4),
         ("Below 1", 5, 1),
     }
-    assert {(item["cell"]["value"], item["row_offset"], item["start_col"]) for item in second["cells"]} == {
+    assert {(item["value"], item["row_offset"], item["start_col"]) for item in second["cells"]} == {
         ("Customer: Globex", 0, 1),
         ("South", 1, 1),
         ("Side 2", 2, 4),
@@ -1423,6 +1425,7 @@ def test_pdf_repeat_dataframe_occupation_spans():
             record,
             block_height=section["block_height"],
             merges=[],
+            cell_templates=section["cell_templates"],
             batch_size=1,
         )
     )

@@ -39,7 +39,7 @@ __all__ = [
 
 # §1. Constants & Exceptions
 
-BUNDLE_VERSION = "1.0"
+BUNDLE_VERSION = "1.1"
 _ALIGNMENTS = frozenset({"left", "center", "right"})
 _DATAFRAME_SHIFT_MODES = frozenset({"both", "horizontal", "vertical", "none"})
 
@@ -467,6 +467,7 @@ def _compile_repeat_section(
                 "merged_regions": record_merges,
             }
         )
+    cell_templates = _compact_repeat_record_cells(compiled_records)
     section = {
             "key": repeat_key,
             "start_row": repeat["start_row"],
@@ -475,10 +476,48 @@ def _compile_repeat_section(
             "template_end_row": block_end,
             "block_height": block_height,
             "merged_regions": repeat_merges,
+            "cell_templates": cell_templates,
             "records": compiled_records,
         }
     _validate_repeat_merges_do_not_overlap_dataframes(section)
     return section, max_col
+
+
+def _compact_repeat_record_cells(records: list[dict[str, Any]]) -> list[CellSchema]:
+    templates: list[CellSchema] = []
+    template_ids: dict[str, int] = {}
+    for record in records:
+        compact_cells: list[dict[str, Any]] = []
+        for item in record["cells"]:
+            cell = item["cell"]
+            template = _repeat_cell_template(cell)
+            key = json.dumps(template, sort_keys=True, separators=(",", ":"), default=str)
+            template_id = template_ids.get(key)
+            if template_id is None:
+                template_id = len(templates)
+                template_ids[key] = template_id
+                templates.append(template)  # type: ignore[arg-type]
+            compact_cells.append(
+                {
+                    "row_offset": item["row_offset"],
+                    "start_col": item["start_col"],
+                    "cell_template": template_id,
+                    "value": cell.get("value"),
+                    "cell_type": cell.get("cell_type"),
+                }
+            )
+        record["cells"] = compact_cells
+    return templates
+
+
+def _repeat_cell_template(cell: CellSchema) -> dict[str, Any]:
+    template = dict(cell)
+    template["coordinate"] = "A1"
+    template["value"] = None
+    template["cell_type"] = "empty"
+    template["merged"] = False
+    template["merge_anchor"] = None
+    return template
 
 
 def _validate_repeat_layout(sheet: SheetSchema, repeat: dict[str, Any]) -> None:
@@ -1246,7 +1285,7 @@ def load_report_bundle(bundle_path: str) -> ReportBundle:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if manifest.get("version") != BUNDLE_VERSION:
+    if manifest.get("version") not in {BUNDLE_VERSION, "1.0"}:
         raise ValueError(
             f"Unsupported report bundle version: {manifest.get('version')!r}"
         )
