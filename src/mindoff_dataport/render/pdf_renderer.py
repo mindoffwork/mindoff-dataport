@@ -17,9 +17,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, TableStyle
 
-from .bundle import ReportBundle
-from .template_contract import _infer_cell_type, _parse_dims
-from .schema import CellSchema, SheetSchema
+from ..compile.bundle import ReportBundle
+from ..compile.template_contract import _infer_cell_type, _parse_dims
+from ..schema import CellSchema, SheetSchema
 from .xlsx_renderer import (
     _anchor_layouts,
     _anchor_row_merges,
