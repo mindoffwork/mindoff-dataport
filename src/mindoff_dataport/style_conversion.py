@@ -1,9 +1,9 @@
-from typing import Optional
+﻿from typing import Optional
 
 from openpyxl.styles import Color
 from openpyxl.styles.borders import Side
 
-from ..schema import BorderSide
+from .schema import BorderSide
 
 # §1. Constants & Exceptions
 

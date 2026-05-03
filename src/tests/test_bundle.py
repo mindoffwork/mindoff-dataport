@@ -10,8 +10,8 @@ import reportlab
 from reportlab.platypus import PageBreak
 
 from mindoff_dataport import mo_dataport
-from mindoff_dataport.compile.bundle import load_report_bundle
-from mindoff_dataport.render.pdf_renderer import (
+from mindoff_dataport.bundle import load_report_bundle
+from mindoff_dataport.pdf_renderer import (
     _FontResolver,
     _LazyFlowables,
     _apply_tint,
@@ -26,7 +26,7 @@ from mindoff_dataport.render.pdf_renderer import (
     _sheet_flowables,
     _table_style,
 )
-from mindoff_dataport.render.xlsx_renderer import _expanded_cells
+from mindoff_dataport.xlsx_renderer import _expanded_cells
 
 # §1. Constants & Exceptions
 

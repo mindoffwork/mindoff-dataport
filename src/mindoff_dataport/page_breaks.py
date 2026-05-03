@@ -5,7 +5,7 @@ from typing import Any
 
 from openpyxl.worksheet.pagebreak import Break, ColBreak, RowBreak
 
-from ..compile.template_contract import _parse_dims
+from .template_contract import _parse_dims
 
 __all__ = [
     "apply_manual_breaks",

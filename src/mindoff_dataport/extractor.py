@@ -7,7 +7,7 @@ from openpyxl.cell.cell import Cell, MergedCell
 from openpyxl.utils.cell import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from ..schema import (
+from .schema import (
     AlignmentSchema,
     BorderSide,
     CellBorders,
@@ -18,8 +18,8 @@ from ..schema import (
     SheetSchema,
     WorkbookSchema,
 )
-from ._page_breaks import extract_manual_breaks
-from ..render._style_conversion import border_side_to_dict, normalize_color
+from .page_breaks import extract_manual_breaks
+from .style_conversion import border_side_to_dict, normalize_color
 
 # §1. Constants & Exceptions
 

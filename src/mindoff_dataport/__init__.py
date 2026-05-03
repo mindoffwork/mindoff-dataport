@@ -3,14 +3,14 @@
 from types import SimpleNamespace
 from typing import Any, Literal
 
-from .compile.bundle import (
+from .bundle import (
     ReportBundle,
     compile_report_bundle as _compile_report_bundle_impl,
 )
-from .extract.extractor import extract_template as _extract_template_impl
+from .extractor import extract_template as _extract_template_impl
 from .schema import WorkbookSchema
-from .compile.template_contract import get_template_inputs as _get_template_inputs_impl
-from .render.xlsx_renderer import export_report_bundle as _export_report_bundle_impl
+from .template_contract import get_template_inputs as _get_template_inputs_impl
+from .xlsx_renderer import export_report_bundle as _export_report_bundle_impl
 
 __all__ = [
     "ReportBundle",
