@@ -28,8 +28,8 @@ from .template_contract import (
     _to_headers,
     get_template_inputs,
 )
-from ..extract._page_breaks import resolve_compiled_sheet_page_breaks
-from ..schema import CellSchema, SheetSchema, WorkbookSchema
+from .page_breaks import resolve_compiled_sheet_page_breaks
+from .schema import CellSchema, SheetSchema, WorkbookSchema
 
 __all__ = [
     "ReportBundle",
