@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import re
@@ -9,7 +9,7 @@ from openpyxl.utils.cell import (
     coordinate_from_string,
 )
 
-from .schema import (
+from ..schema import (
     AlignmentSchema,
     CellBorders,
     FillSchema,

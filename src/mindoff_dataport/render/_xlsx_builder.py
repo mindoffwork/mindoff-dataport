@@ -11,7 +11,7 @@ from openpyxl.utils.cell import (
 )
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .schema import (
+from ..schema import (
     AlignmentSchema,
     CellBorders,
     CellSchema,
@@ -19,7 +19,7 @@ from .schema import (
     FontSchema,
     SheetSchema,
 )
-from .style_conversion import argb_to_color, dict_to_border_side
+from ._style_conversion import argb_to_color, dict_to_border_side
 
 # §1. Constants & Exceptions
 

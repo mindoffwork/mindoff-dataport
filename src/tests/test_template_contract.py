@@ -5,7 +5,7 @@ import datetime
 import pytest
 
 from mindoff_dataport import mo_dataport
-from mindoff_dataport.template_contract import _infer_cell_type, get_template_inputs
+from mindoff_dataport.compile.template_contract import _infer_cell_type, get_template_inputs
 
 # §1. Constants & Exceptions
 

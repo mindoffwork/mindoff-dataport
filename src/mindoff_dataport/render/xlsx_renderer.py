@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import shutil
@@ -17,7 +17,7 @@ from openpyxl.utils.cell import (
     get_column_letter,
 )
 
-from .xlsx_builder import (
+from ._xlsx_builder import (
     _apply_cell_styles,
     _apply_cell_value,
     _apply_dimensions,
@@ -28,10 +28,10 @@ from .xlsx_builder import (
     _build_fill,
     _build_font,
 )
-from .bundle import ReportBundle, load_report_bundle
-from .page_breaks import apply_manual_breaks
-from .template_contract import _infer_cell_type, _parse_dims
-from .schema import CellSchema, SheetSchema
+from ..compile.bundle import ReportBundle, load_report_bundle
+from ..extract._page_breaks import apply_manual_breaks
+from ..compile.template_contract import _infer_cell_type, _parse_dims
+from ..schema import CellSchema, SheetSchema
 
 __all__ = ["export_report_bundle"]
 
