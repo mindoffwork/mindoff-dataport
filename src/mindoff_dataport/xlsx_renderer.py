@@ -176,6 +176,16 @@ def _anchor_layouts(anchor: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _dataframe_stream_id(anchor: dict[str, Any]) -> str:
+    key = anchor.get("key")
+    if key:
+        return f"key:{key}"
+    source = anchor.get("source")
+    if source:
+        return str(source)
+    return "key:"
+
+
 def _layout_alignment(cell: CellSchema, layout: dict[str, Any]) -> dict[str, Any]:
     alignment = dict(cell["alignment"])
     if layout.get("alignment") is not None:
@@ -1331,23 +1341,37 @@ def _repeat_record_rows(
 
     headers_by_offset: dict[int, list[dict[str, Any]]] = {}
     content_by_offset: dict[int, list[dict[str, Any]]] = {}
+    header_rows_by_source: dict[str, dict[str, Any]] = {}
     for anchor in record["dataframe_anchors"]:
+        stream_id = _dataframe_stream_id(anchor)
         target = (
             headers_by_offset
             if anchor["placeholder_type"] == "dataframe-header"
             else content_by_offset
         )
         target.setdefault(anchor["start_row_offset"], []).append(anchor)
+        if anchor["placeholder_type"] == "dataframe-header":
+            header_cells: dict[int, CellSchema] = {}
+            for cell in _header_cells_at(anchor, 1):
+                _, col_idx = _coord_indexes(cell["coordinate"])
+                header_cells[col_idx] = cell
+            header_rows_by_source[stream_id] = {
+                "cells": header_cells,
+                "merges": _anchor_row_merges(anchor, 1),
+                "is_dataframe_header_row": True,
+            }
 
     offset = 0
     while offset < block_height:
         row_cells = dict(cells_by_offset.get(offset, {}))
         header_merges: list[dict[str, Any]] = []
+        header_sources: list[str] = []
         for anchor in headers_by_offset.get(offset, []):
             for cell in _header_cells_at(anchor, offset + 1):
                 _, col_idx = _coord_indexes(cell["coordinate"])
                 row_cells[col_idx] = cell
             header_merges.extend(_anchor_row_merges(anchor, offset + 1))
+            header_sources.append(_dataframe_stream_id(anchor))
 
         content_anchors = content_by_offset.get(offset, [])
         if not content_anchors:
@@ -1355,6 +1379,8 @@ def _repeat_record_rows(
                 "cells": row_cells,
                 "merges": _repeat_merges_starting_at(merges or [], offset)
                 + header_merges,
+                "dataframe_header_sources": header_sources,
+                "is_dataframe_header_row": bool(header_sources),
             }
             offset += 1
             continue
@@ -1364,6 +1390,7 @@ def _repeat_record_rows(
             row_cells,
             content_anchors,
             base_merges=header_merges,
+            header_rows_by_source=header_rows_by_source,
             batch_size=batch_size,
         )
         anchor = content_anchors[0]
@@ -1442,6 +1469,7 @@ def _repeat_content_rows(
     anchors: list[dict[str, Any]],
     *,
     base_merges: list[dict[str, Any]] | None = None,
+    header_rows_by_source: dict[str, dict[str, Any]] | None = None,
     batch_size: int,
 ) -> Iterator[dict[str, Any]]:
     if len(anchors) > 1:
@@ -1453,7 +1481,8 @@ def _repeat_content_rows(
     layouts = _anchor_layouts(anchor)
     wrote = False
     for row_values in _cached_source_rows(bundle, source, batch_size=batch_size):
-        row_cells = dict(base_cells) if not wrote else {}
+        first_content_row = not wrote
+        row_cells = dict(base_cells) if first_content_row else {}
         for layout, value in zip(layouts, row_values):
             row_cells.update(
                 _layout_row_cells(
@@ -1464,7 +1493,13 @@ def _repeat_content_rows(
                 )
             )
         wrote = True
-        yield {"cells": row_cells, "merges": (base_merges or []) + _anchor_row_merges(anchor, 1)}
+        yield {
+            "cells": row_cells,
+            "merges": (base_merges or []) + _anchor_row_merges(anchor, 1),
+            "dataframe_content_sources": [_dataframe_stream_id(anchor)],
+            "dataframe_content_start_sources": [_dataframe_stream_id(anchor)] if first_content_row else [],
+            "dataframe_header_rows_by_source": header_rows_by_source or {},
+        }
     if not wrote:
         yield {"cells": base_cells, "merges": base_merges or []}
 
@@ -2036,6 +2071,7 @@ def export_report_bundle(
             margin=options.get("margin", 36),
             streaming_chunk_rows=streaming_chunk_rows,
             fonts=options.get("fonts"),
+            repeat_dataframe_headers=options.get("repeat_dataframe_headers", False),
         )
         result = None
     elif export_mode == "streaming":

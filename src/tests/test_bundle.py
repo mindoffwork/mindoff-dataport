@@ -15,6 +15,7 @@ from mindoff_dataport.pdf_renderer import (
     _FontResolver,
     _LazyFlowables,
     _apply_tint,
+    _chunked_row_flowables,
     _chunked_row_tables,
     _column_widths,
     _data_source_map,
@@ -1588,6 +1589,185 @@ def test_pdf_sheet_flowables_insert_manual_page_break_for_streamed_dataframe_row
     )
 
     assert any(isinstance(item, PageBreak) for item in flowables)
+
+
+def test_pdf_repeat_dataframe_headers_default_keeps_repeat_rows_disabled():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) >= 2
+    assert all(table.repeatRows == 0 for table in tables)
+
+
+def test_pdf_repeat_dataframe_headers_does_not_repeat_for_plain_chunk_splits():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 1
+
+
+def test_pdf_repeat_dataframe_headers_with_manual_break_keeps_pagebreak_and_header_repeat():
+    sheet = _schema({"A1": _cell("A1", "x")}, dims="A1:A1")["sheets"][0]
+    header_row = {
+        "cells": {1: _cell("A1", "Col")},
+        "merges": [],
+        "is_dataframe_header_row": True,
+    }
+    rows = iter(
+        [
+            {
+                "cells": {1: _cell("A1", "Col")},
+                "merges": [],
+                "row_idx": 1,
+                "dataframe_header_sources": ["key:rows"],
+                "is_dataframe_header_row": True,
+            },
+            {
+                "cells": {1: _cell("A1", 1)},
+                "merges": [],
+                "row_idx": 2,
+                "dataframe_content_sources": ["key:rows"],
+                "dataframe_content_start_sources": ["key:rows"],
+                "dataframe_header_rows_by_source": {"key:rows": header_row},
+            },
+            {
+                "cells": {1: _cell("A1", 2)},
+                "merges": [],
+                "row_idx": 3,
+                "dataframe_content_sources": ["key:rows"],
+                "dataframe_content_start_sources": [],
+                "dataframe_header_rows_by_source": {"key:rows": header_row},
+            },
+        ]
+    )
+
+    flowables = list(
+        _chunked_row_flowables(
+            sheet,
+            rows,
+            1,
+            1,
+            500,
+            _FontResolver(),
+            streaming_chunk_rows=10,
+            page_breaks={2},
+            repeat_dataframe_headers=True,
+        )
+    )
+    assert any(isinstance(item, PageBreak) for item in flowables)
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) >= 2
+    assert tables[1].repeatRows == 1
+
+
+def test_pdf_repeat_dataframe_headers_does_not_fake_header_without_header_anchor():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 0
+
+
+def test_pdf_repeat_dataframe_headers_repeat_section_does_not_repeat_for_plain_chunk_splits():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{rows:dataframe}}"),
+            "A3": _cell("A3", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A3",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"reports": [{"rows": polars.DataFrame({"A": [1, 2, 3]})}]}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 1
 
 
 def test_pdf_sheet_flowables_insert_manual_page_break_for_repeat_rows():
