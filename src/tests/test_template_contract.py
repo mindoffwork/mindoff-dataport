@@ -87,6 +87,22 @@ def test_get_template_inputs_returns_dynamic_wildcard_contract():
     }
 
 
+def test_get_template_inputs_merges_dataframe_placeholder_variants():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{rows:dataframe-header}}"),
+                "A2": _cell("A2", "{{rows:dataframe-content}}"),
+            },
+        )
+    )
+
+    result = get_template_inputs(schema)
+
+    assert result == {"Sheet 1": {"rows": "dataframe"}}
+
+
 def test_get_template_inputs_returns_repeat_contract():
     schema = _schema(
         _sheet(
@@ -222,6 +238,22 @@ def test_get_template_inputs_raises_for_incompatible_dynamic_scope():
         get_template_inputs(schema)
 
 
+def test_get_template_inputs_ignores_unknown_placeholder_types():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{name:string}}"),
+                "A2": _cell("A2", "{{ignored:custom-type}}"),
+            },
+        )
+    )
+
+    result = get_template_inputs(schema)
+
+    assert result == {"Sheet 1": {"name": "string"}}
+
+
 def test_compile_rejects_non_dict_root_payload():
     schema = _schema(_sheet("Sheet 1", {"A1": _cell("A1", "{{name:string}}")}))
 
@@ -266,6 +298,35 @@ def test_compile_rejects_duplicate_output_sheet_names():
         mo_dataport.compile(schema, {"Summary": {}, "reports": {"Summary": {"name": "Acme"}}})
 
 
+def test_compile_rejects_repeat_end_before_start():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{reports:repeat-end}}"),
+            },
+        )
+    )
+
+    with pytest.raises(ValueError, match="repeat-end appears before repeat-start"):
+        mo_dataport.compile(schema, {"Sheet 1": {"reports": []}})
+
+
+def test_compile_rejects_repeat_start_and_end_on_same_row():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{reports:repeat-start}}"),
+                "B1": _cell("B1", "{{reports:repeat-end}}"),
+            },
+        )
+    )
+
+    with pytest.raises(ValueError, match="must appear before repeat-end"):
+        mo_dataport.compile(schema, {"Sheet 1": {"reports": []}})
+
+
 def test_compile_validates_scalar_and_dataframe_types():
     schema = _schema(
         _sheet(
@@ -292,6 +353,49 @@ def test_compile_validates_scalar_and_dataframe_types():
             schema,
             {"Sheet 1": {"active": True, "when": "2024-01-01", "rows": []}},
         )
+
+
+def test_compile_repeat_records_requires_dataframe_constant():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{reports:repeat-start}}"),
+                "A2": _cell("A2", "{{name:string}}"),
+                "A3": _cell("A3", "{{rows:dataframe-content}}"),
+                "A4": _cell("A4", "{{reports:repeat-end}}"),
+            },
+        )
+    )
+
+    payload = {
+        "Sheet 1": {
+            "reports": mo_dataport.repeat_records([{"name": "Alice"}]),
+        }
+    }
+    with pytest.raises(KeyError, match="requires dataframe 'rows'"):
+        mo_dataport.compile(schema, payload)
+
+
+def test_compile_repeat_records_requires_scalar_column():
+    schema = _schema(
+        _sheet(
+            "Sheet 1",
+            {
+                "A1": _cell("A1", "{{reports:repeat-start}}"),
+                "A2": _cell("A2", "{{name:string}}"),
+                "A3": _cell("A3", "{{reports:repeat-end}}"),
+            },
+        )
+    )
+
+    payload = {
+        "Sheet 1": {
+            "reports": mo_dataport.repeat_records([{"other": "Alice"}]),
+        }
+    }
+    with pytest.raises(KeyError, match="requires scalar column 'name'"):
+        mo_dataport.compile(schema, payload)
 
 
 def test_compile_substitutes_scalar_placeholders_inside_text():
