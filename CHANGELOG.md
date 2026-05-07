@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.4.0
 
 ### Internal
 - 🚚 Organize mindoff_dataport into extract, compile, and render subpackages ([#8](https://github.com/mindoffwork/mindoff-dataport/pull/8))
