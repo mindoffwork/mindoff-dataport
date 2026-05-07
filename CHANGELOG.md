@@ -11,6 +11,9 @@
 ### Enhancements
 - ⚡ Speed up XLSX repeat streaming exports ([#10](https://github.com/mindoffwork/mindoff-dataport/pull/10))
 
+### Features
+- ✨ Add support for repeating dataframe headers in PDF and tests ([#11](https://github.com/mindoffwork/mindoff-dataport/pull/11))
+
 ## v0.3.0
 
 ### Fixes
