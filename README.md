@@ -1,4 +1,4 @@
-<h1>Mindoff Dataport</h1>
+﻿<h1>Mindoff Dataport</h1>
 
 _Build high-fidelity Excel and PDF reports from reusable `.xlsx` templates._
 
@@ -116,19 +116,19 @@ mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 ### Workflow
 
 ```
-.xlsx template  ──extract()──►  WorkbookSchema
-                                     │
+.xlsx template  â”€â”€extract()â”€â”€â–º  WorkbookSchema
+                                     â”‚
                               compile(schema, data)
-                                     │
-                                     ▼
+                                     â”‚
+                                     â–¼
                               ReportBundle (directory)
-                              ├── manifest.json
-                              ├── report.json
-                              └── data/*.parquet
-                                     │
-                            export(bundle, path, format=…)
-                                     │
-                             ┌───────┴───────┐
+                              â”œâ”€â”€ manifest.json
+                              â”œâ”€â”€ report.json
+                              â””â”€â”€ data/*.parquet
+                                     â”‚
+                            export(bundle, path, format=â€¦)
+                                     â”‚
+                             â”Œâ”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”
                           .xlsx           .pdf
 ```
 
@@ -155,9 +155,17 @@ from mindoff_dataport import (
 
 ## 5. API Reference
 
-### `extract(path)` — `extract_template(path)`
+### Template Extraction API
 
 Reads an `.xlsx` file and returns a `WorkbookSchema` containing cell styles, dimensions, merged regions, manual print breaks, and discovered placeholder types.
+
+**Usage**
+
+```python
+schema = extract("template.xlsx")
+# or
+schema = extract_template("template.xlsx")
+```
 
 | Parameter | Type  | Required | Description                          |
 |-----------|-------|----------|--------------------------------------|
@@ -165,9 +173,17 @@ Reads an `.xlsx` file and returns a `WorkbookSchema` containing cell styles, dim
 
 **Returns:** `WorkbookSchema`
 
-### `inputs(schema)` — `get_template_inputs(schema)`
+### Input Discovery API
 
 Inspects the schema and returns a sheet-scoped dictionary of all inputs the template requires, keyed by sheet name and then by placeholder key.
+
+**Usage**
+
+```python
+contract = inputs(schema)
+# or
+contract = get_template_inputs(schema)
+```
 
 | Parameter | Type            | Required | Description                              |
 |-----------|-----------------|----------|------------------------------------------|
@@ -187,9 +203,23 @@ Example output:
 }
 ```
 
-### `compile(template, data, bundle_path=None, dataframe_options=None, dataframe_shift="both")` - `compile_report_bundle(...)`
+### Bundle Compilation API
 
 Binds runtime data to the template, validates all inputs against the sheet contract, materialises Polars DataFrames / LazyFrames to Parquet, and produces a `ReportBundle`.
+
+**Usage**
+
+```python
+bundle = compile(
+    template=schema,
+    data=payload,
+    bundle_path="out_bundle",
+    dataframe_options=None,
+    dataframe_shift="both",
+)
+# or
+bundle = compile_report_bundle(schema, payload)
+```
 
 | Parameter           | Type                     | Required | Description                                                                                 |
 |---------------------|--------------------------|----------|---------------------------------------------------------------------------------------------|
@@ -203,19 +233,26 @@ Binds runtime data to the template, validates all inputs against the sheet contr
 
 **Raises:** `KeyError` if a required placeholder key is missing from the payload.
 
-### `export(bundle_or_path, output_path, format="xlsx", **options)` — `export_report_bundle(...)`
+### Bundle Export API
 
 Renders the bundle to a file. Accepts an in-memory `ReportBundle` or a path to a persisted bundle directory.
 
+**Usage**
+
+```python
+export(bundle, "report.xlsx", format="xlsx")
+# or
+export_report_bundle("out_bundle", "report.pdf", format="pdf")
+```
+
 | Parameter        | Type                  | Required | Default   | Description                                                                     |
 |------------------|-----------------------|----------|-----------|---------------------------------------------------------------------------------|
-| `bundle_or_path` | `ReportBundle \| str` | Yes      | —         | In-memory bundle or path to a bundle directory                                  |
-| `output_path`    | `str`                 | Yes      | —         | Destination file path (`.xlsx` or `.pdf`)                                       |
+| `bundle_or_path` | `ReportBundle \| str` | Yes      | -         | In-memory bundle or path to a bundle directory                                  |
+| `output_path`    | `str`                 | Yes      | -         | Destination file path (`.xlsx` or `.pdf`)                                       |
 | `format`         | `str`                 | No       | `"xlsx"`  | Output format: `"xlsx"`, `"pdf"`. (`"image"` is reserved; raises `NotImplementedError`) |
-| `**options`      | —                     | No       | —         | Sizing and format-specific options. See [Export Options](#export-options)       |
+| `**options`      | -                     | No       | -         | Sizing and format-specific options. See [Export Options](#export-options)       |
 
 **Returns:** `None` for `"fidelity"` XLSX and all PDF exports. `list[str]` for `"streaming"` XLSX: one workbook path when no split is needed, or one `.zip` path when the export is split across workbooks.
-
 ## 6. Template Placeholders
 
 Mark cells in your `.xlsx` template using the `{{key:type}}` syntax. The extractor reads these markers and builds the input contract.
@@ -307,7 +344,7 @@ When a template sheet name is exactly `{{key}}`, it becomes a template for multi
 ```python
 {
     "region_sheet": {                          # sheet-name placeholder key
-        "North Sheet": {                       # → output sheet name
+        "North Sheet": {                       # â†’ output sheet name
             "region_name": "North",
             "owner": "Alice",
             "sales_rows": north_df,
@@ -453,7 +490,7 @@ For opt-in repeated dataframe headers in PDF (including repeat blocks), see
 
 | Option                  | Type    | Default       | Description                                                                              |
 |-------------------------|---------|---------------|------------------------------------------------------------------------------------------|
-| `export_mode`           | `str`   | `"fidelity"`  | `"fidelity"`: full in-memory render (supports all features). `"streaming"`: row-by-row write (lower memory, limited features — see constraints below) |
+| `export_mode`           | `str`   | `"fidelity"`  | `"fidelity"`: full in-memory render (supports all features). `"streaming"`: row-by-row write (lower memory, limited features â€” see constraints below) |
 | `column_width_mode`     | `str`   | schema value  | `"fixed"`, `"even"`, or `"hug"`. Overrides the value stored in the template schema      |
 | `row_height_mode`       | `str`   | schema value  | `"fixed"`, `"even"`, or `"hug"`. Overrides the value stored in the template schema      |
 | `default_column_width`  | `float` | schema value  | Fallback column width in Excel character units when mode is `"even"` or no width stored  |
@@ -478,7 +515,7 @@ PDF-specific options are passed as keyword arguments alongside sizing options.
 |-------------------------|-------------------|---------------|----------------------------------------------------------------------|
 | `page_size`             | `str`             | `"A4"`        | Paper size: `"A4"`, `"LETTER"`, or `"LEGAL"`                        |
 | `orientation`           | `str`             | `"portrait"`  | Page orientation: `"portrait"` or `"landscape"`                      |
-| `margin`                | `float`           | `36`          | Page margin in points (≥ 0). Applied equally on all four sides       |
+| `margin`                | `float`           | `36`          | Page margin in points (â‰¥ 0). Applied equally on all four sides       |
 | `streaming_chunk_rows`  | `int`             | `50000`       | Rows read per batch for `dataframe-content` and repeat sections      |
 | `fonts`                 | `dict \| None`    | `None`        | Custom TrueType / OpenType font families. See [Custom Fonts for PDF](#custom-fonts-for-pdf) |
 | `repeat_dataframe_headers` | `bool`         | `False`       | Opt-in: repeat dataframe header rows across later PDF table chunks/pages when matching `dataframe-header` anchors exist |
@@ -584,7 +621,7 @@ The template's `show_gridlines` property is preserved in XLSX output.
 
 By default the PDF renderer maps all cell fonts to ReportLab's built-in **Helvetica** family. To use your own TrueType or OpenType fonts, pass a `fonts` dict to `export()`.
 
-### Shorthand — Regular Only
+### Shorthand â€” Regular Only
 
 Provide a single file path when you only have a regular weight:
 
@@ -653,10 +690,10 @@ When `bundle_path` is passed to `compile()`, the bundle is persisted as a direct
 
 ```
 report_bundle/
-├── manifest.json      # bundle version, inputs, sheet metadata, dataframe sources, capabilities
-├── report.json        # resolved scalar cells and dataframe anchor/repeat plans
-└── data/
-    └── *.parquet      # dataframe sources materialised from Polars inputs
+â”œâ”€â”€ manifest.json      # bundle version, inputs, sheet metadata, dataframe sources, capabilities
+â”œâ”€â”€ report.json        # resolved scalar cells and dataframe anchor/repeat plans
+â””â”€â”€ data/
+    â””â”€â”€ *.parquet      # dataframe sources materialised from Polars inputs
 ```
 
 > `report.json` stores dataframe **anchors** (column names, start row/column, style), not the expanded row data. Rows stay in Parquet and are read at export time.
@@ -858,10 +895,11 @@ mo_dataport.export(
 | XLSX export (fidelity)   | Supported                          |
 | XLSX export (streaming)  | Supported                          |
 | PDF export               | Supported (ReportLab)              |
-| Image export             | Reserved — raises `NotImplementedError` in v1 |
+| Image export             | Reserved â€” raises `NotImplementedError` in v1 |
 | Nested repeat sections   | Not supported in v1                |
 | Patterned fills          | Not extracted or rendered          |
 
 ## 16. License
 
 Released under the [MIT License](https://github.com/mindoffwork/mindoff-dataport/blob/root/LICENSE).
+
