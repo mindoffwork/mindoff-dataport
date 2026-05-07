@@ -15,6 +15,7 @@ from mindoff_dataport.pdf_renderer import (
     _FontResolver,
     _LazyFlowables,
     _apply_tint,
+    _chunked_row_flowables,
     _chunked_row_tables,
     _column_widths,
     _data_source_map,
@@ -27,6 +28,22 @@ from mindoff_dataport.pdf_renderer import (
     _table_style,
 )
 from mindoff_dataport.xlsx_renderer import _expanded_cells
+from mindoff_dataport.xlsx_renderer import (
+    _apply_merged_region_borders,
+    _apply_streaming_dimensions,
+    _delete_bundle_dir,
+    _edge_border_schema_bounds,
+    _merged_region_edge_schemas,
+    _resolve_color_field,
+    _resolved_borders,
+    _resolved_fill,
+    _resolved_font,
+    _xlsxwriter_border_style,
+    _xlsxwriter_color,
+    _xlsxwriter_format_props,
+    _xlsxwriter_logical_border_sides,
+    _xlsxwriter_pattern,
+)
 
 # §1. Constants & Exceptions
 
@@ -1590,6 +1607,185 @@ def test_pdf_sheet_flowables_insert_manual_page_break_for_streamed_dataframe_row
     assert any(isinstance(item, PageBreak) for item in flowables)
 
 
+def test_pdf_repeat_dataframe_headers_default_keeps_repeat_rows_disabled():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) >= 2
+    assert all(table.repeatRows == 0 for table in tables)
+
+
+def test_pdf_repeat_dataframe_headers_does_not_repeat_for_plain_chunk_splits():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 1
+
+
+def test_pdf_repeat_dataframe_headers_with_manual_break_keeps_pagebreak_and_header_repeat():
+    sheet = _schema({"A1": _cell("A1", "x")}, dims="A1:A1")["sheets"][0]
+    header_row = {
+        "cells": {1: _cell("A1", "Col")},
+        "merges": [],
+        "is_dataframe_header_row": True,
+    }
+    rows = iter(
+        [
+            {
+                "cells": {1: _cell("A1", "Col")},
+                "merges": [],
+                "row_idx": 1,
+                "dataframe_header_sources": ["key:rows"],
+                "is_dataframe_header_row": True,
+            },
+            {
+                "cells": {1: _cell("A1", 1)},
+                "merges": [],
+                "row_idx": 2,
+                "dataframe_content_sources": ["key:rows"],
+                "dataframe_content_start_sources": ["key:rows"],
+                "dataframe_header_rows_by_source": {"key:rows": header_row},
+            },
+            {
+                "cells": {1: _cell("A1", 2)},
+                "merges": [],
+                "row_idx": 3,
+                "dataframe_content_sources": ["key:rows"],
+                "dataframe_content_start_sources": [],
+                "dataframe_header_rows_by_source": {"key:rows": header_row},
+            },
+        ]
+    )
+
+    flowables = list(
+        _chunked_row_flowables(
+            sheet,
+            rows,
+            1,
+            1,
+            500,
+            _FontResolver(),
+            streaming_chunk_rows=10,
+            page_breaks={2},
+            repeat_dataframe_headers=True,
+        )
+    )
+    assert any(isinstance(item, PageBreak) for item in flowables)
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) >= 2
+    assert tables[1].repeatRows == 1
+
+
+def test_pdf_repeat_dataframe_headers_does_not_fake_header_without_header_anchor():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": [1, 2, 3]})}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 0
+
+
+def test_pdf_repeat_dataframe_headers_repeat_section_does_not_repeat_for_plain_chunk_splits():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "{{rows:dataframe}}"),
+            "A3": _cell("A3", "{{reports:repeat-end}}"),
+        },
+        dims="A1:A3",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"reports": [{"rows": polars.DataFrame({"A": [1, 2, 3]})}]}},
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=1,
+            font_resolver=_FontResolver(),
+            repeat_dataframe_headers=True,
+        )
+    )
+    tables = [item for item in flowables if hasattr(item, "repeatRows")]
+    assert len(tables) == 1
+    assert tables[0].repeatRows == 1
+
+
 def test_pdf_sheet_flowables_insert_manual_page_break_for_repeat_rows():
     schema = _schema(
         {
@@ -1791,6 +1987,232 @@ def test_pdf_paragraph_respects_wrap_text_true():
     assert "<br/>" in result.text
 
 
+def test_pdf_paragraph_applies_inline_markup_for_font_variants():
+    cell = _cell("A1", "note")
+    cell["font"] = dict(cell["font"])
+    cell["font"]["underline"] = "single"
+    cell["font"]["strike"] = True
+    cell["font"]["vert_align"] = "superscript"
+    result = _paragraph(cell, _FontResolver())
+    assert "<u>" in result.text
+    assert "<strike>" in result.text
+    assert "<super>" in result.text
+
+
+def test_pdf_table_style_rtl_start_end_borders_map_to_edges():
+    cell = _cell("A1", "RTL")
+    cell["alignment"] = dict(cell["alignment"])
+    cell["alignment"]["reading_order"] = 2
+    cell["borders"] = dict(cell["borders"])
+    cell["borders"]["start"] = {"style": "medium", "color": "FF000000"}
+    cell["borders"]["end"] = {"style": "thin", "color": "FF000000"}
+    sheet = _schema({"A1": cell}, dims="A1:A1")["sheets"][0]
+    commands = _table_style(sheet, {(1, 1): cell}, 1, 1, 1, 1, _FontResolver()).getCommands()
+    assert any(item[0] == "LINEAFTER" for item in commands)
+    assert any(item[0] == "LINEBEFORE" for item in commands)
+
+
+def test_pdf_table_style_pattern_fill_prefers_bg_then_fg_fallback():
+    cell = _cell("A1", "Pattern")
+    cell["fill"] = {"pattern_type": "gray125", "fg_color": "FFFF0000", "bg_color": "FFFFFFFF"}
+    sheet = _schema({"A1": cell}, dims="A1:A1")["sheets"][0]
+    commands = _table_style(sheet, {(1, 1): cell}, 1, 1, 1, 1, _FontResolver()).getCommands()
+    assert any(item[0] == "BACKGROUND" for item in commands)
+
+
+def test_xlsxwriter_helper_mappings_cover_known_and_unknown_values():
+    assert _xlsxwriter_pattern("solid") == 1
+    assert _xlsxwriter_pattern("gray125") == 17
+    assert _xlsxwriter_pattern("unknown") is None
+
+    assert _xlsxwriter_border_style("thin") == 1
+    assert _xlsxwriter_border_style("double") == 6
+    assert _xlsxwriter_border_style("unknown") is None
+
+    assert _xlsxwriter_logical_border_sides({"reading_order": 2}) == {"start": "right", "end": "left"}
+    assert _xlsxwriter_logical_border_sides({"reading_order": 1}) == {"start": "left", "end": "right"}
+
+    assert _xlsxwriter_color("FF112233") == "#112233"
+    assert _xlsxwriter_color("theme:0:0.0") == "#FFFFFF"
+    assert _xlsxwriter_color("theme:bad:0.0") is None
+
+
+def test_xlsxwriter_format_props_covers_pattern_and_border_variants():
+    cell = _cell("A1", 1)
+    cell["font"] = dict(cell["font"])
+    cell["font"]["color"] = "theme:0:0.0"
+    cell["font"]["vert_align"] = "subscript"
+    cell["fill"] = {
+        "pattern_type": "gray125",
+        "fg_color": "FF112233",
+        "bg_color": "FF445566",
+    }
+    cell["alignment"] = dict(cell["alignment"])
+    cell["alignment"]["reading_order"] = 2
+    cell["borders"] = dict(cell["borders"])
+    cell["borders"]["start"] = {"style": "thin", "color": "FF010203"}
+    cell["borders"]["end"] = {"style": "medium", "color": "FF040506"}
+    cell["borders"]["diagonal"] = {"style": "dashed", "color": "FF112233"}
+    cell["borders"]["diagonal_up"] = True
+    cell["borders"]["diagonal_down"] = True
+    cell["number_format"] = "0.00"
+
+    props = _xlsxwriter_format_props(cell, ["FFFFFFFF"] * 12)
+
+    assert props["font_script"] == 2
+    assert props["pattern"] == 17
+    assert props["fg_color"] == "#112233"
+    assert props["bg_color"] == "#445566"
+    assert props["right"] == 1
+    assert props["left"] == 2
+    assert props["diag_type"] == 3
+    assert props["num_format"] == "0.00"
+
+
+def test_xlsxwriter_format_props_drops_unresolvable_fill_colors():
+    cell = _cell("A1", "x")
+    cell["fill"] = {
+        "pattern_type": "solid",
+        "fg_color": "theme:99:0.0",
+        "bg_color": "theme:99:0.0",
+    }
+
+    props = _xlsxwriter_format_props(cell, ["FFFFFFFF"])
+
+    assert "pattern" not in props
+    assert "fg_color" not in props
+    assert "bg_color" not in props
+
+
+def test_xlsx_resolve_color_helpers_cover_theme_and_passthrough():
+    theme = ["FF010203"] * 12
+    assert _resolve_color_field("theme:0:0.0", theme) == "FF010203"
+    assert _resolve_color_field("FF112233", theme) == "FF112233"
+    assert _resolve_color_field("theme:0:0.0", None) == "theme:0:0.0"
+
+    fill = {"pattern_type": "solid", "fg_color": "theme:0:0.0", "bg_color": None}
+    font = {"name": "Calibri", "size": 11.0, "color": "theme:0:0.0"}
+    borders = {
+        "left": {"style": "thin", "color": "theme:0:0.0"},
+        "right": {"style": None, "color": None},
+    }
+
+    assert _resolved_fill(fill, theme)["fg_color"] == "FF010203"
+    assert _resolved_font(font, theme)["color"] == "FF010203"
+    assert _resolved_borders(borders, theme)["left"]["color"] == "FF010203"
+
+
+def test_xlsx_merged_edge_schema_bounds_and_region_synthesis():
+    borders = _cell("A1", "x")["borders"]
+    borders["top"] = {"style": "thin", "color": "FF000000"}
+    borders["left"] = {"style": "medium", "color": "FF000000"}
+    borders["diagonal_up"] = True
+
+    edge = _edge_border_schema_bounds(
+        borders,
+        min_row=1,
+        max_row=2,
+        min_col=1,
+        max_col=2,
+        row=1,
+        col=1,
+    )
+    assert edge is not None
+    assert edge["top"]["style"] == "thin"
+    assert edge["left"]["style"] == "medium"
+    assert edge["diagonal_up"] is True
+
+    empty_borders = _cell("A1", "x")["borders"]
+    assert (
+        _edge_border_schema_bounds(
+            empty_borders,
+            min_row=1,
+            max_row=1,
+            min_col=1,
+            max_col=1,
+            row=1,
+            col=1,
+        )
+        is None
+    )
+
+    anchor = _cell("A1", "Merged")
+    anchor["borders"] = borders
+    sheet = _schema({"A1": anchor}, dims="A1:B2")["sheets"][0]
+    sheet["merged_regions"] = ["A1:B2", "C1:D2"]
+    edges = _merged_region_edge_schemas(sheet)
+    assert (1, 1) in edges
+    assert edges[(1, 1)]["value"] == "Merged"
+
+
+def test_xlsx_apply_merged_borders_uses_cells_override_and_skips_missing_anchor():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.merge_cells("A1:B1")
+
+    anchor = _cell("A1", "Title")
+    anchor["borders"]["top"] = {"style": "thin", "color": "FF000000"}
+    sheet = _schema({}, dims="A1:B1")["sheets"][0]
+    sheet["merged_regions"] = ["A1:B1", "C1:D1"]
+    _apply_merged_region_borders(ws, sheet, cells={(1, 1): anchor})
+    assert ws["A1"].border.top.style == "thin"
+
+
+def test_xlsx_apply_streaming_dimensions_handles_fixed_and_even_modes():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    sheet_fixed = _schema({}, dims="A1:B2")["sheets"][0]
+    sheet_fixed["column_width_mode"] = "fixed"
+    sheet_fixed["row_height_mode"] = "fixed"
+    sheet_fixed["column_widths"] = {"A": 20.0, "B": None}
+    sheet_fixed["row_heights"] = {"1": 30.0, "2": None}
+    _apply_streaming_dimensions(ws, sheet_fixed)
+    assert ws.column_dimensions["A"].width == 20.0
+    assert ws.row_dimensions[1].height == 30.0
+
+    sheet_even = _schema({}, dims="A1:C3")["sheets"][0]
+    sheet_even["column_width_mode"] = "even"
+    sheet_even["row_height_mode"] = "even"
+    sheet_even["default_column_width"] = 11.0
+    sheet_even["default_row_height"] = 13.0
+    _apply_streaming_dimensions(ws, sheet_even)
+    assert ws.column_dimensions["C"].width == 11.0
+    assert ws.row_dimensions[3].height == 13.0
+
+
+def test_xlsx_delete_bundle_dir_safety_guards(managed_tmp_dir: Path):
+    bundle_dir = managed_tmp_dir / "bundle-dir"
+    bundle = mo_dataport.compile(
+        _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1"),
+        {"Sheet1": {"name": "Alice"}},
+        bundle_path=str(bundle_dir),
+    )
+    assert bundle_dir.exists()
+    _delete_bundle_dir(bundle)
+    assert not bundle_dir.exists()
+
+    file_path = managed_tmp_dir / "not-dir"
+    file_path.write_text("x", encoding="utf-8")
+    file_bundle = mo_dataport.compile(
+        _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1"),
+        {"Sheet1": {"name": "Bob"}},
+    )
+    object.__setattr__(file_bundle, "path", str(file_path))
+    _delete_bundle_dir(file_bundle)
+
+    malformed = managed_tmp_dir / "malformed"
+    malformed.mkdir()
+    malformed_bundle = mo_dataport.compile(
+        _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1"),
+        {"Sheet1": {"name": "Carol"}},
+    )
+    object.__setattr__(malformed_bundle, "path", str(malformed))
+    with pytest.raises(ValueError, match="Refusing to delete malformed report bundle directory"):
+        _delete_bundle_dir(malformed_bundle)
+
+
 def test_pdf_export_accepts_bundle_path(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle_path = managed_tmp_dir / "report_bundle"
@@ -1857,6 +2279,24 @@ def test_pdf_export_rejects_invalid_page_options(managed_tmp_dir: Path):
             format="pdf",
             margin=-1,
         )
+
+
+def test_pdf_export_supports_landscape_orientation(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "Landscape")}, dims="A1:A1")
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+    out = managed_tmp_dir / "landscape.pdf"
+
+    mo_dataport.export(
+        bundle,
+        str(out),
+        format="pdf",
+        page_size="A4",
+        orientation="landscape",
+        margin=12,
+    )
+
+    assert out.exists()
+    assert out.read_bytes().startswith(b"%PDF")
 
 
 def test_pdf_export_rejects_invalid_font_configs(managed_tmp_dir: Path):

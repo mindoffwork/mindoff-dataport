@@ -819,7 +819,9 @@ def _dataframe_pdf_rows(
         merge_by_row[row_idx] = _static_row_merges(sheet, row_idx)
 
     content_states: list[dict[str, Any]] = []
+    header_rows_by_source: dict[str, dict[str, Any]] = {}
     for anchor in sheet.get("dataframe_anchors", []):
+        stream_id = _dataframe_stream_id(anchor)
         if anchor["placeholder_type"] == "dataframe-header":
             row_cells = static_by_row.setdefault(anchor["start_row"], {})
             for _, cell in _header_cells(anchor):
@@ -828,12 +830,22 @@ def _dataframe_pdf_rows(
             merge_by_row.setdefault(anchor["start_row"], []).extend(
                 _anchor_row_merges(anchor, anchor["start_row"])
             )
+            header_cells: dict[int, CellSchema] = {}
+            for _, cell in _header_cells(anchor):
+                _, col_idx = _coord_indexes(cell["coordinate"])
+                header_cells[col_idx] = cell
+            header_rows_by_source[stream_id] = {
+                "cells": header_cells,
+                "merges": _anchor_row_merges(anchor, 1),
+                "is_dataframe_header_row": True,
+            }
             continue
 
         source = source_map[anchor["source"]]
         content_states.append(
             {
                 "anchor": anchor,
+                "stream_id": stream_id,
                 "rows": _source_rows(bundle, source, batch_size=batch_size),
                 "remaining": int(source.get("rows", 0)),
             }
@@ -842,6 +854,8 @@ def _dataframe_pdf_rows(
     for row_idx in range(min_row, max_row + 1):
         row_cells = dict(static_by_row.get(row_idx, {}))
         row_merges = list(merge_by_row.get(row_idx, []))
+        content_sources: list[str] = []
+        content_start_sources: list[str] = []
         for state in content_states:
             anchor = state["anchor"]
             if row_idx < anchor["start_row"] or state["remaining"] <= 0:
@@ -852,6 +866,10 @@ def _dataframe_pdf_rows(
                 state["remaining"] = 0
                 continue
             state["remaining"] -= 1
+            stream_id = state["stream_id"]
+            content_sources.append(stream_id)
+            if row_idx == int(anchor["start_row"]):
+                content_start_sources.append(stream_id)
             for layout, value in zip(_anchor_layouts(anchor), row_values):
                 col_idx = anchor["start_col"] + layout["start_col_offset"]
                 content_cell = dict(anchor["cell"])
@@ -860,7 +878,22 @@ def _dataframe_pdf_rows(
                 content_cell["alignment"] = _layout_alignment(anchor["cell"], layout)
                 row_cells[col_idx] = content_cell  # type: ignore[assignment]
             row_merges.extend(_anchor_row_merges(anchor, row_idx))
-        yield {"cells": row_cells, "merges": row_merges, "row_idx": row_idx}
+        header_sources = [
+            _dataframe_stream_id(anchor)
+            for anchor in sheet.get("dataframe_anchors", [])
+            if anchor["placeholder_type"] == "dataframe-header"
+            and int(anchor["start_row"]) == row_idx
+        ]
+        yield {
+            "cells": row_cells,
+            "merges": row_merges,
+            "row_idx": row_idx,
+            "dataframe_header_sources": header_sources,
+            "dataframe_content_sources": content_sources,
+            "dataframe_content_start_sources": content_start_sources,
+            "dataframe_header_rows_by_source": header_rows_by_source,
+            "is_dataframe_header_row": bool(header_sources),
+        }
 
 
 def _chunked_row_tables(
@@ -936,51 +969,107 @@ def _chunked_row_flowables(
     streaming_chunk_rows: int,
     page_breaks: set[int] | None = None,
     chunk_row_height: float | None = None,
+    repeat_dataframe_headers: bool = False,
 ) -> Iterator[Any]:
-    chunk: list[dict[str, Any]] = []
-    previous_row_idx: int | None = None
-    manual_breaks = page_breaks or set()
-    for row_item in row_items:
-        row_idx = int(row_item.get("row_idx", 0) or 0)
-        if chunk and previous_row_idx in manual_breaks:
-            yield _row_chunk_table(
-                sheet,
-                chunk,
-                min_col,
-                max_col,
-                available_width,
-                font_resolver,
-                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
-            )
-            yield PageBreak()
-            chunk = []
-        if (
-            chunk
-            and _chunk_merges_fit(chunk)
-            and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows
-        ):
-            yield _row_chunk_table(
-                sheet,
-                chunk,
-                min_col,
-                max_col,
-                available_width,
-                font_resolver,
-                per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
-            )
-            chunk = []
-        chunk.append(row_item)
-        previous_row_idx = row_idx
-    if chunk:
-        yield _row_chunk_table(
-            sheet,
+    def _emit_chunk(*, prepend_dataframe_headers: bool) -> Any:
+        prepared_chunk, repeat_rows = _prepare_chunk_rows(
             chunk,
+            repeat_dataframe_headers=repeat_dataframe_headers,
+            prepend_dataframe_headers=prepend_dataframe_headers,
+        )
+        return _row_chunk_table(
+            sheet,
+            prepared_chunk,
             min_col,
             max_col,
             available_width,
             font_resolver,
-            per_row_heights=_per_row_heights(sheet, chunk, chunk_row_height),
+            per_row_heights=_per_row_heights(sheet, prepared_chunk, chunk_row_height),
+            repeat_rows=repeat_rows,
         )
+
+    chunk: list[dict[str, Any]] = []
+    previous_row_idx: int | None = None
+    manual_breaks = page_breaks or set()
+    prepend_dataframe_headers_on_next_chunk = False
+    for row_item in row_items:
+        row_idx = int(row_item.get("row_idx", 0) or 0)
+        if (
+            repeat_dataframe_headers
+            and chunk
+            and row_item.get("is_dataframe_header_row")
+        ):
+            yield _emit_chunk(
+                prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
+            )
+            chunk = []
+            prepend_dataframe_headers_on_next_chunk = False
+        if chunk and previous_row_idx in manual_breaks:
+            yield _emit_chunk(
+                prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
+            )
+            yield PageBreak()
+            chunk = []
+            prepend_dataframe_headers_on_next_chunk = True
+        if (
+            chunk
+            and not repeat_dataframe_headers
+            and _chunk_merges_fit(chunk)
+            and len(chunk) + _row_item_merge_height(row_item) > streaming_chunk_rows
+        ):
+            yield _emit_chunk(
+                prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
+            )
+            chunk = []
+            prepend_dataframe_headers_on_next_chunk = False
+        chunk.append(row_item)
+        previous_row_idx = row_idx
+    if chunk:
+        yield _emit_chunk(
+            prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
+        )
+
+
+def _prepare_chunk_rows(
+    rows: list[dict[str, Any]],
+    *,
+    repeat_dataframe_headers: bool,
+    prepend_dataframe_headers: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    if not rows:
+        return rows, 0
+    prepared = list(rows)
+    if repeat_dataframe_headers and prepend_dataframe_headers:
+        first = rows[0]
+        content_sources = [str(item) for item in first.get("dataframe_content_sources", [])]
+        start_sources = {str(item) for item in first.get("dataframe_content_start_sources", [])}
+        continued_sources = [source for source in content_sources if source not in start_sources]
+        header_rows_by_source = first.get("dataframe_header_rows_by_source", {})
+        inserted: list[dict[str, Any]] = []
+        for source in continued_sources:
+            header_row = header_rows_by_source.get(source)
+            if header_row is None:
+                continue
+            inserted.append(dict(header_row))
+        if inserted:
+            prepared = [*inserted, *prepared]
+
+    repeat_rows = 0
+    for row in prepared:
+        if not row.get("is_dataframe_header_row"):
+            break
+        repeat_rows += 1
+    return prepared, repeat_rows if repeat_dataframe_headers else 0
+
+
+def _dataframe_stream_id(anchor: dict[str, Any]) -> str:
+    key = anchor.get("key")
+    if key:
+        return f"key:{key}"
+    source = anchor.get("source")
+    if source:
+        return str(source)
+    return "key:"
 
 
 def _dataframe_sheet_flowables(
@@ -994,6 +1083,7 @@ def _dataframe_sheet_flowables(
     default_row_height: float | None,
     streaming_chunk_rows: int,
     font_resolver: _FontResolver,
+    repeat_dataframe_headers: bool = False,
 ) -> Iterator[Table]:
     sheet = _sheet_with_overrides(
         raw_sheet,
@@ -1025,6 +1115,7 @@ def _dataframe_sheet_flowables(
         streaming_chunk_rows=streaming_chunk_rows,
         page_breaks=_resolved_row_page_breaks(sheet),
         chunk_row_height=chunk_row_height,
+        repeat_dataframe_headers=repeat_dataframe_headers,
     )
 
 
@@ -1039,6 +1130,7 @@ def _repeat_sheet_flowables(
     default_row_height: float | None,
     streaming_chunk_rows: int,
     font_resolver: _FontResolver,
+    repeat_dataframe_headers: bool = False,
 ) -> Iterator[Any]:
     sheet = _sheet_with_overrides(
         raw_sheet,
@@ -1064,6 +1156,7 @@ def _repeat_sheet_flowables(
         font_resolver,
         streaming_chunk_rows=streaming_chunk_rows,
         page_breaks=_resolved_row_page_breaks(sheet),
+        repeat_dataframe_headers=repeat_dataframe_headers,
     )
 
 
@@ -1078,6 +1171,7 @@ def _static_sheet_flowables(
     default_row_height: float | None,
     streaming_chunk_rows: int,
     font_resolver: _FontResolver,
+    repeat_dataframe_headers: bool = False,
 ) -> Iterator[Any]:
     del bundle
     sheet = _sheet_with_overrides(
@@ -1098,6 +1192,7 @@ def _static_sheet_flowables(
         font_resolver,
         streaming_chunk_rows=max(segment_rows, streaming_chunk_rows),
         page_breaks=_resolved_row_page_breaks(sheet),
+        repeat_dataframe_headers=repeat_dataframe_headers,
     )
 
 
@@ -1112,6 +1207,7 @@ def _sheet_flowables(
     default_row_height: float | None,
     streaming_chunk_rows: int,
     font_resolver: _FontResolver,
+    repeat_dataframe_headers: bool = False,
 ) -> Iterator[Any]:
     if raw_sheet.get("repeat_sections"):
         yield from _repeat_sheet_flowables(
@@ -1124,6 +1220,7 @@ def _sheet_flowables(
             default_row_height=default_row_height,
             streaming_chunk_rows=streaming_chunk_rows,
             font_resolver=font_resolver,
+            repeat_dataframe_headers=repeat_dataframe_headers,
         )
         return
     if _has_dataframe_content(raw_sheet):
@@ -1137,6 +1234,7 @@ def _sheet_flowables(
             default_row_height=default_row_height,
             streaming_chunk_rows=streaming_chunk_rows,
             font_resolver=font_resolver,
+            repeat_dataframe_headers=repeat_dataframe_headers,
         )
         return
     yield from _static_sheet_flowables(
@@ -1149,6 +1247,7 @@ def _sheet_flowables(
         default_row_height=default_row_height,
         streaming_chunk_rows=streaming_chunk_rows,
         font_resolver=font_resolver,
+        repeat_dataframe_headers=repeat_dataframe_headers,
     )
 
 
@@ -1237,6 +1336,7 @@ def _row_chunk_table(
     font_resolver: _FontResolver,
     *,
     per_row_heights: list[float] | None = None,
+    repeat_rows: int = 0,
 ) -> Table:
     cells: dict[tuple[int, int], CellSchema] = {}
     merged_regions: list[str] = []
@@ -1268,7 +1368,7 @@ def _row_chunk_table(
             available_width,
         ),
         rowHeights=per_row_heights,
-        repeatRows=0,
+        repeatRows=repeat_rows,
         splitByRow=1,
     )
     table.setStyle(_table_style(chunk_sheet, cells, min_col, 1, max_col, len(rows), font_resolver))
@@ -1313,6 +1413,7 @@ def export_report_bundle(
     margin: float = 36,
     streaming_chunk_rows: int = 50_000,
     fonts: dict[str, Any] | None = None,
+    repeat_dataframe_headers: bool = False,
 ) -> None:
     """Render a ReportBundle to a styled PDF."""
     if streaming_chunk_rows <= 0:
@@ -1348,6 +1449,7 @@ def export_report_bundle(
                 default_row_height=default_row_height,
                 streaming_chunk_rows=streaming_chunk_rows,
                 font_resolver=font_resolver,
+                repeat_dataframe_headers=repeat_dataframe_headers,
             )
 
     doc.build(_LazyFlowables(flowables()))

@@ -8,7 +8,11 @@ from openpyxl.utils.cell import get_column_letter
 
 from mindoff_dataport import extract_template
 from mindoff_dataport.style_conversion import (
+    argb_to_color,
+    border_side_to_dict,
+    dict_to_border_side,
     extract_theme_colors,
+    normalize_color,
     resolve_theme_color,
 )
 
@@ -174,6 +178,57 @@ def test_resolve_theme_color_uses_palette_and_tint():
     assert resolve_theme_color("theme:4:-0.5", palette) == "FF081119"
     assert resolve_theme_color("FFABCDEF", palette) == "FFABCDEF"
     assert resolve_theme_color("theme:not-a-number:0", palette) is None
+
+
+def test_resolve_theme_color_rejects_invalid_shapes():
+    assert resolve_theme_color("theme:2", DEFAULT_THEME := extract_theme_colors(None)) is None
+    assert resolve_theme_color("theme:-1:0.0", DEFAULT_THEME) is None
+    assert resolve_theme_color("theme:100:0.0", DEFAULT_THEME) is None
+    assert resolve_theme_color("theme:2:0.0", ["BAD"]) is None
+
+
+def test_extract_theme_colors_falls_back_for_invalid_xml_and_missing_scheme():
+    assert extract_theme_colors("<broken") == extract_theme_colors(None)
+    assert (
+        extract_theme_colors(
+            b'<?xml version="1.0"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"></a:theme>'
+        )
+        == extract_theme_colors(None)
+    )
+
+
+def test_style_color_and_border_conversion_defensive_paths():
+    assert normalize_color(Color(type="indexed", indexed=4)) == "FF0000FF"
+    assert normalize_color(Color(type="indexed", indexed=999)) is None
+    assert normalize_color(Color(type="auto")) is None
+    assert normalize_color(Color(rgb="00000000")) is None
+    assert normalize_color(Color(rgb="112233")) == "00112233"
+
+    themed = argb_to_color("theme:4:0.25")
+    assert themed is not None
+    assert themed.type == "theme"
+    assert themed.theme == 4
+
+    plain = argb_to_color("FF112233")
+    assert plain is not None
+    assert plain.rgb == "FF112233"
+
+    side = dict_to_border_side({"style": "thin", "color": "theme:1:0.0"})
+    converted = border_side_to_dict(side)
+    assert converted["style"] == "thin"
+    assert converted["color"] == "theme:1:0.0"
+
+
+def test_extract_theme_colors_falls_back_when_scheme_entries_are_missing():
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Broken">
+  <a:themeElements>
+    <a:clrScheme name="Broken">
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"""
+    assert extract_theme_colors(xml) == extract_theme_colors(None)
 
 
 def test_borders_captured(workbook_schema):

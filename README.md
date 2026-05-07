@@ -446,6 +446,8 @@ Excel manual print breaks from the template are extracted into schema metadata a
 - PDF uses resolved row breaks as manual page boundaries and ignores column breaks
 
 See `examples/page_break/xlsx.py` and `examples/page_break/pdf.py`.
+For opt-in repeated dataframe headers in PDF (including repeat blocks), see
+`examples/repeat_dataframe_headers/xlsx.py` and `examples/repeat_dataframe_headers/pdf.py`.
 
 ### XLSX Options
 
@@ -479,6 +481,7 @@ PDF-specific options are passed as keyword arguments alongside sizing options.
 | `margin`                | `float`           | `36`          | Page margin in points (≥ 0). Applied equally on all four sides       |
 | `streaming_chunk_rows`  | `int`             | `50000`       | Rows read per batch for `dataframe-content` and repeat sections      |
 | `fonts`                 | `dict \| None`    | `None`        | Custom TrueType / OpenType font families. See [Custom Fonts for PDF](#custom-fonts-for-pdf) |
+| `repeat_dataframe_headers` | `bool`         | `False`       | Opt-in: repeat dataframe header rows across later PDF table chunks/pages when matching `dataframe-header` anchors exist |
 | `column_width_mode`     | `str`             | schema value  | Same as XLSX. For sheets with `dataframe-content`, PDF supports `"fixed"` and `"even"` only |
 | `row_height_mode`       | `str`             | schema value  | Same as XLSX. PDF also supports `"hug"` for `dataframe-content` row height |
 | `default_column_width`  | `float`           | schema value  | Same as XLSX                                                         |
