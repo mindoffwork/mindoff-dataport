@@ -13,6 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, legal, letter, landscape, portrait
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, TableStyle
@@ -76,6 +77,9 @@ _DEFAULT_THEME_COLORS: list[tuple[int, int, int]] = [
 _EXCEL_WIDTH_TO_POINTS = 7.0
 _MIN_COLUMN_WIDTH = 24.0
 _MAX_COLUMN_WIDTH = 180.0
+_FAST_GRID_MIN_ROW_HEIGHT = 1.0
+_FAST_GRID_TEXT_PADDING_X = 3.0
+_FAST_GRID_TEXT_PADDING_Y = 2.0
 
 # §2. Classes and Sub Classes
 
@@ -330,6 +334,44 @@ def _pdf_fill_color(fill: dict) -> "colors.Color | None":
     return bg_c if (bg_c is not None and bg_c != white) else (fg_c or bg_c)
 
 
+def _has_visible_border(borders: dict, alignment: dict | None = None) -> bool:
+    alignment = alignment or {}
+    is_rtl = int(alignment.get("reading_order") or 0) == 2
+    sides = [
+        borders.get("top", {}),
+        borders.get("bottom", {}),
+        _effective_left_border(borders, is_rtl),
+        _effective_right_border(borders, is_rtl),
+    ]
+    return any(side.get("style") for side in sides)
+
+
+def _has_inline_markup(font: dict[str, Any]) -> bool:
+    return bool(font.get("underline") or font.get("strike") or font.get("vert_align"))
+
+
+def _fast_grid_cell_supported(cell: CellSchema) -> bool:
+    alignment = cell.get("alignment", {})
+    font = cell.get("font", {})
+    if alignment.get("wrap_text") and "\n" in _cell_text(cell.get("value")):
+        return False
+    if alignment.get("horizontal") in {"justify", "distributed"}:
+        return False
+    if alignment.get("text_rotation"):
+        return False
+    return not _has_inline_markup(font)
+
+
+def _cell_visible_for_bounds(cell: CellSchema) -> bool:
+    if _cell_text(cell.get("value")):
+        return True
+    if _pdf_fill_color(cell.get("fill", {})) is not None:
+        return True
+    if _has_visible_border(cell.get("borders", {}), cell.get("alignment", {})):
+        return True
+    return bool(cell.get("merged"))
+
+
 def _indent_points(alignment: dict) -> float:
     """Convert indent + relative_indent to PDF padding points (1 unit ≈ 7 pt)."""
     indent = int(alignment.get("indent") or 0)
@@ -481,6 +523,116 @@ def _col_letter(col_idx: int) -> str:
         col_idx, remainder = divmod(col_idx - 1, 26)
         result = chr(65 + remainder) + result
     return result
+
+
+def _pdf_visible_column_bounds(sheet: SheetSchema) -> tuple[int, int]:
+    min_col, _, max_col, _ = _parse_dims(sheet["dimensions"])
+    visible: set[int] = set()
+    for cell in sheet["cells"].values():
+        row_idx, col_idx = _coord_indexes(cell["coordinate"])
+        del row_idx
+        if _cell_visible_for_bounds(cell):
+            visible.add(col_idx)
+    for raw_region in sheet.get("merged_regions", []):
+        region = CellRange(raw_region)
+        anchor = sheet["cells"].get(f"{_col_letter(region.min_col)}{region.min_row}")
+        if anchor is not None and _cell_visible_for_bounds(anchor):
+            visible.update(range(region.min_col, region.max_col + 1))
+    for anchor in sheet.get("dataframe_anchors", []):
+        start_col = int(anchor["start_col"])
+        visible.update(range(start_col, start_col + _occupied_width(anchor)))
+    if not visible:
+        return min_col, max_col
+    return min(visible), max(visible)
+
+
+def _fast_grid_plan(
+    bundle: ReportBundle,
+    raw_sheet: dict[str, Any],
+    *,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    available_width: float,
+    repeat_dataframe_headers: bool,
+) -> dict[str, Any] | None:
+    if repeat_dataframe_headers or raw_sheet.get("repeat_sections"):
+        return None
+    sheet = _sheet_with_overrides(
+        raw_sheet,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+    )
+    if sheet.get("row_height_mode", "fixed") == "hug":
+        return None
+    if sheet.get("column_width_mode", "fixed") == "hug":
+        return None
+    if _has_dataframe_content(sheet):
+        _validate_pdf_dataframe_sizing(sheet, column_width_mode=column_width_mode)
+        sheet = _expanded_sheet_from_manifest(sheet, _data_source_map(bundle))
+    for cell in sheet.get("cells", {}).values():
+        if not _fast_grid_cell_supported(cell):
+            return None
+    for anchor in sheet.get("dataframe_anchors", []):
+        if not _fast_grid_cell_supported(anchor["cell"]):
+            return None
+        if anchor["placeholder_type"] == "dataframe-header":
+            for _, header_cell in _header_cells(anchor):
+                if not _fast_grid_cell_supported(header_cell):
+                    return None
+    for raw_region in sheet.get("merged_regions", []):
+        region = CellRange(raw_region)
+        if region.min_row != region.max_row:
+            return None
+
+    min_col, max_col = _pdf_visible_column_bounds(sheet)
+    _, min_row, _, max_row = _parse_dims(sheet["dimensions"])
+    col_widths = _column_widths(
+        sheet,
+        {},
+        min_col,
+        min_row,
+        max_col,
+        max_row,
+        available_width,
+    )
+    return {
+        "sheet": sheet,
+        "min_col": min_col,
+        "max_col": max_col,
+        "col_widths": col_widths,
+    }
+
+
+def _fast_grid_plans(
+    bundle: ReportBundle,
+    *,
+    available_width: float,
+    column_width_mode: str | None,
+    row_height_mode: str | None,
+    default_column_width: float | None,
+    default_row_height: float | None,
+    repeat_dataframe_headers: bool,
+) -> list[dict[str, Any]] | None:
+    plans: list[dict[str, Any]] = []
+    for raw_sheet in bundle.report["sheets"]:
+        plan = _fast_grid_plan(
+            bundle,
+            raw_sheet,
+            column_width_mode=column_width_mode,
+            row_height_mode=row_height_mode,
+            default_column_width=default_column_width,
+            default_row_height=default_row_height,
+            available_width=available_width,
+            repeat_dataframe_headers=repeat_dataframe_headers,
+        )
+        if plan is None:
+            return None
+        plans.append(plan)
+    return plans
 
 
 def _table_data(
@@ -1396,6 +1548,365 @@ def _ensure_output_parent(output_path: str) -> None:
     if parent and not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)
 
+def _fast_grid_rows(
+    bundle: ReportBundle,
+    sheet: SheetSchema,
+    *,
+    streaming_chunk_rows: int,
+) -> Iterator[dict[str, Any]]:
+    if _has_dataframe_content(sheet):
+        source_map = _data_source_map(bundle)
+        yield from _dataframe_pdf_rows(
+            bundle,
+            source_map,
+            sheet,
+            batch_size=streaming_chunk_rows,
+        )
+        return
+    _, min_row, _, max_row = _parse_dims(sheet["dimensions"])
+    yield from _static_pdf_rows(sheet, min_row, max_row)
+
+
+def _fast_grid_row_height(
+    sheet: SheetSchema,
+    row_item: dict[str, Any],
+    data_row_height: float | None,
+) -> float:
+    heights = _per_row_heights(sheet, [row_item], data_row_height)
+    if not heights:
+        return _DEFAULT_ROW_HEIGHT
+    return max(float(heights[0]), _FAST_GRID_MIN_ROW_HEIGHT)
+
+
+def _fast_grid_col_positions(left: float, col_widths: list[float]) -> list[float]:
+    positions = [left]
+    for width in col_widths:
+        positions.append(positions[-1] + width)
+    return positions
+
+
+def _fast_grid_merge_for_col(
+    row_item: dict[str, Any], col_idx: int
+) -> dict[str, Any] | None:
+    for merge in row_item.get("merges", []):
+        if merge["min_col"] <= col_idx <= merge["max_col"]:
+            return merge
+    return None
+
+
+def _fast_grid_cell_rect(
+    x_positions: list[float],
+    min_col: int,
+    max_col: int,
+    col_idx: int,
+    merge: dict[str, Any] | None,
+) -> tuple[float, float] | None:
+    if merge is not None:
+        if col_idx != int(merge["min_col"]):
+            return None
+        start_col = max(int(merge["min_col"]), min_col)
+        end_col = min(int(merge["max_col"]), max_col)
+    else:
+        start_col = end_col = col_idx
+    if start_col > max_col or end_col < min_col:
+        return None
+    start_offset = start_col - min_col
+    end_offset = end_col - min_col + 1
+    return x_positions[start_offset], x_positions[end_offset]
+
+
+def _fast_grid_draw_fill(
+    pdf: canvas.Canvas,
+    cell: CellSchema,
+    x0: float,
+    y_bottom: float,
+    width: float,
+    height: float,
+) -> bool:
+    fill_color = _pdf_fill_color(cell.get("fill", {}))
+    if fill_color is None:
+        return False
+    if fill_color == colors.white:
+        return False
+    pdf.setFillColor(fill_color)
+    pdf.rect(x0, y_bottom, width, height, stroke=0, fill=1)
+    return True
+
+
+def _fast_grid_draw_text(
+    pdf: canvas.Canvas,
+    cell: CellSchema,
+    font_resolver: _FontResolver,
+    state: dict[str, Any],
+    x0: float,
+    y_bottom: float,
+    width: float,
+    height: float,
+) -> None:
+    text = _cell_text(cell.get("value")).replace("\n", " ")
+    if not text:
+        return
+    font = cell["font"]
+    alignment = cell["alignment"]
+    font_size = float(font.get("size") or 11.0)
+    font_name = font_resolver.font_name(font)
+    font_key = (font_name, font_size)
+    if state.get("font") != font_key:
+        pdf.setFont(font_name, font_size)
+        state["font"] = font_key
+    fill_color = _hex_color(font.get("color")) or colors.black
+    if state.get("fill_color") != fill_color:
+        pdf.setFillColor(fill_color)
+        state["fill_color"] = fill_color
+    indent = _indent_points(alignment)
+    left_padding = max(indent, _FAST_GRID_TEXT_PADDING_X)
+    right_padding = _FAST_GRID_TEXT_PADDING_X
+    if alignment.get("vertical") == "bottom":
+        y_text = y_bottom + _FAST_GRID_TEXT_PADDING_Y
+    elif alignment.get("vertical") == "center":
+        y_text = y_bottom + (height - font_size) / 2
+    else:
+        y_text = y_bottom + height - font_size - _FAST_GRID_TEXT_PADDING_Y
+    horizontal = alignment.get("horizontal")
+    if horizontal in {"center", "centerContinuous"}:
+        pdf.drawCentredString(x0 + width / 2, y_text, text)
+    elif horizontal == "right":
+        pdf.drawRightString(x0 + width - right_padding, y_text, text)
+    else:
+        pdf.drawString(x0 + left_padding, y_text, text)
+
+
+def _fast_grid_set_line_style(pdf: canvas.Canvas, side: dict[str, Any]) -> None:
+    style = side.get("style")
+    pdf.setLineWidth(_BORDER_WIDTHS.get(style, 0.5))
+    pdf.setStrokeColor(_hex_color(side.get("color")) or colors.black)
+    if style == "dashed":
+        pdf.setDash(3, 2)
+    elif style == "dotted":
+        pdf.setDash(1, 2)
+    else:
+        pdf.setDash()
+
+
+def _fast_grid_draw_border_line(
+    pdf: canvas.Canvas,
+    side: dict[str, Any],
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> None:
+    if not side.get("style"):
+        return
+    _fast_grid_set_line_style(pdf, side)
+    pdf.line(x1, y1, x2, y2)
+    pdf.setDash()
+
+
+def _fast_grid_uniform_border_side(
+    row_item: dict[str, Any], min_col: int, max_col: int
+) -> dict[str, Any] | None:
+    if row_item.get("merges"):
+        return None
+    expected: tuple[str | None, str | None] | None = None
+    side: dict[str, Any] | None = None
+    for col_idx in range(min_col, max_col + 1):
+        cell = row_item["cells"].get(col_idx)
+        if cell is None:
+            return None
+        borders = cell["borders"]
+        current_sides = [
+            borders.get("top", {}),
+            borders.get("bottom", {}),
+            borders.get("left", {}),
+            borders.get("right", {}),
+        ]
+        keys = {(item.get("style"), item.get("color")) for item in current_sides}
+        if len(keys) != 1:
+            return None
+        key = next(iter(keys))
+        if not key[0]:
+            return None
+        if expected is None:
+            expected = key
+            side = current_sides[0]
+        elif key != expected:
+            return None
+    return side
+
+
+def _fast_grid_draw_borders(
+    pdf: canvas.Canvas,
+    cell: CellSchema,
+    x0: float,
+    y_bottom: float,
+    width: float,
+    height: float,
+) -> None:
+    borders = cell["borders"]
+    alignment = cell["alignment"]
+    is_rtl = int(alignment.get("reading_order") or 0) == 2
+    x1 = x0 + width
+    y_top = y_bottom + height
+    _fast_grid_draw_border_line(pdf, borders["top"], x0, y_top, x1, y_top)
+    _fast_grid_draw_border_line(pdf, borders["bottom"], x0, y_bottom, x1, y_bottom)
+    _fast_grid_draw_border_line(
+        pdf, _effective_left_border(borders, is_rtl), x0, y_bottom, x0, y_top
+    )
+    _fast_grid_draw_border_line(
+        pdf, _effective_right_border(borders, is_rtl), x1, y_bottom, x1, y_top
+    )
+
+
+def _fast_grid_draw_row(
+    pdf: canvas.Canvas,
+    row_item: dict[str, Any],
+    *,
+    min_col: int,
+    max_col: int,
+    x_positions: list[float],
+    y_top: float,
+    row_height: float,
+    font_resolver: _FontResolver,
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    y_bottom = y_top - row_height
+    uniform_border = _fast_grid_uniform_border_side(row_item, min_col, max_col)
+    for col_idx in range(min_col, max_col + 1):
+        merge = _fast_grid_merge_for_col(row_item, col_idx)
+        rect = _fast_grid_cell_rect(x_positions, min_col, max_col, col_idx, merge)
+        if rect is None:
+            continue
+        cell = row_item["cells"].get(col_idx)
+        if cell is None:
+            continue
+        x0, x1 = rect
+        width = x1 - x0
+        if _fast_grid_draw_fill(pdf, cell, x0, y_bottom, width, row_height):
+            state.pop("fill_color", None)
+        _fast_grid_draw_text(
+            pdf, cell, font_resolver, state, x0, y_bottom, width, row_height
+        )
+        if uniform_border is None:
+            _fast_grid_draw_borders(pdf, cell, x0, y_bottom, width, row_height)
+    return uniform_border
+
+
+def _fast_grid_flush_pending_grid(
+    pdf: canvas.Canvas,
+    pending_grid: dict[str, Any] | None,
+) -> None:
+    if pending_grid is None:
+        return
+    y_positions = pending_grid["y_positions"]
+    x_positions = pending_grid["x_positions"]
+    _fast_grid_set_line_style(pdf, pending_grid["side"])
+    for x in x_positions:
+        pdf.line(x, y_positions[-1], x, y_positions[0])
+    for y in y_positions:
+        pdf.line(x_positions[0], y, x_positions[-1], y)
+    pdf.setDash()
+
+
+def _fast_grid_extend_pending_grid(
+    pending_grid: dict[str, Any] | None,
+    *,
+    side: dict[str, Any],
+    x_positions: list[float],
+    y_top: float,
+    y_bottom: float,
+) -> dict[str, Any]:
+    side_key = (side.get("style"), side.get("color"))
+    if (
+        pending_grid is None
+        or pending_grid["side_key"] != side_key
+        or pending_grid["x_positions"] != x_positions
+        or abs(pending_grid["y_positions"][-1] - y_top) > 0.01
+    ):
+        return {
+            "side": side,
+            "side_key": side_key,
+            "x_positions": x_positions,
+            "y_positions": [y_top, y_bottom],
+        }
+    pending_grid["y_positions"].append(y_bottom)
+    return pending_grid
+
+
+def _render_fast_grid_pdf(
+    bundle: ReportBundle,
+    output_path: str,
+    plans: list[dict[str, Any]],
+    *,
+    pagesize: tuple[float, float],
+    margin: float,
+    streaming_chunk_rows: int,
+    font_resolver: _FontResolver,
+) -> None:
+    pdf = canvas.Canvas(output_path, pagesize=pagesize, pageCompression=1)
+    _, page_height = pagesize
+    available_height = page_height - (margin * 2)
+    first_sheet = True
+    for plan in plans:
+        if not first_sheet:
+            pdf.showPage()
+        first_sheet = False
+        sheet = plan["sheet"]
+        min_col = int(plan["min_col"])
+        max_col = int(plan["max_col"])
+        x_positions = _fast_grid_col_positions(margin, plan["col_widths"])
+        row_y = page_height - margin
+        page_breaks = _resolved_row_page_breaks(sheet)
+        data_row_height = _content_anchor_row_height(sheet)
+        break_before_next_row = False
+        state: dict[str, Any] = {}
+        pending_grid: dict[str, Any] | None = None
+        for row_item in _fast_grid_rows(
+            bundle,
+            sheet,
+            streaming_chunk_rows=streaming_chunk_rows,
+        ):
+            row_height = _fast_grid_row_height(sheet, row_item, data_row_height)
+            if break_before_next_row or (
+                row_y < page_height - margin
+                and row_height <= available_height
+                and row_y - row_height < margin
+            ):
+                _fast_grid_flush_pending_grid(pdf, pending_grid)
+                pending_grid = None
+                pdf.showPage()
+                row_y = page_height - margin
+                break_before_next_row = False
+                state = {}
+            uniform_border = _fast_grid_draw_row(
+                pdf,
+                row_item,
+                min_col=min_col,
+                max_col=max_col,
+                x_positions=x_positions,
+                y_top=row_y,
+                row_height=row_height,
+                font_resolver=font_resolver,
+                state=state,
+            )
+            if uniform_border is not None:
+                pending_grid = _fast_grid_extend_pending_grid(
+                    pending_grid,
+                    side=uniform_border,
+                    x_positions=x_positions,
+                    y_top=row_y,
+                    y_bottom=row_y - row_height,
+                )
+            else:
+                _fast_grid_flush_pending_grid(pdf, pending_grid)
+                pending_grid = None
+            row_y -= row_height
+            row_idx = int(row_item.get("row_idx", 0) or 0)
+            if row_idx in page_breaks:
+                break_before_next_row = True
+        _fast_grid_flush_pending_grid(pdf, pending_grid)
+    pdf.save()
+
 
 # §4. Public Functions
 
@@ -1426,6 +1937,28 @@ def export_report_bundle(
     pagesize = _page_size(page_size, orientation)
     font_resolver = _FontResolver(fonts)
     _ensure_output_parent(output_path)
+    available_width = pagesize[0] - (margin * 2)
+    fast_grid_plans = _fast_grid_plans(
+        bundle,
+        available_width=available_width,
+        column_width_mode=column_width_mode,
+        row_height_mode=row_height_mode,
+        default_column_width=default_column_width,
+        default_row_height=default_row_height,
+        repeat_dataframe_headers=repeat_dataframe_headers,
+    )
+    if fast_grid_plans is not None:
+        _render_fast_grid_pdf(
+            bundle,
+            output_path,
+            fast_grid_plans,
+            pagesize=pagesize,
+            margin=margin,
+            streaming_chunk_rows=streaming_chunk_rows,
+            font_resolver=font_resolver,
+        )
+        return
+
     doc = SimpleDocTemplate(
         output_path,
         pagesize=pagesize,
@@ -1434,7 +1967,6 @@ def export_report_bundle(
         topMargin=margin,
         bottomMargin=margin,
     )
-    available_width = pagesize[0] - (margin * 2)
     def flowables() -> Iterator[Any]:
         for index, raw_sheet in enumerate(bundle.report["sheets"]):
             if index:

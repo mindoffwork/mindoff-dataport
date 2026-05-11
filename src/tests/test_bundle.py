@@ -20,6 +20,7 @@ from mindoff_dataport.pdf_renderer import (
     _column_widths,
     _data_source_map,
     _dataframe_pdf_rows,
+    _fast_grid_plan,
     _hex_color,
     _paragraph,
     _repeat_record_rows,
@@ -1389,6 +1390,146 @@ def test_pdf_column_widths_follow_xlsx_widths_with_deterministic_scaling():
 
     assert _column_widths(sheet, {}, 1, 1, 2, 1, 1_000) == [140.0, 70.0]
     assert _column_widths(sheet, {}, 1, 1, 2, 1, 105) == [70.0, 35.0]
+
+
+def test_pdf_fast_grid_plan_prunes_shifted_invisible_dataframe_columns():
+    title = _cell("A1", "{{report_title:string}}")
+    title["merged"] = True
+    title["merge_anchor"] = "A1"
+    generated = _cell("A2", "Generated: {{generated_on:date}}")
+    generated["merged"] = True
+    generated["merge_anchor"] = "A2"
+    rows = _cell("D2", "Rows: {{row_count:number}}")
+    rows["merged"] = True
+    rows["merge_anchor"] = "D2"
+    header = _cell("A4", "{{bench_data:dataframe-header}}")
+    content = _cell("A5", "{{bench_data:dataframe-content}}")
+    schema = _schema(
+        {
+            "A1": title,
+            "B1": _cell("B1", None),
+            "C1": _cell("C1", None),
+            "D1": _cell("D1", None),
+            "E1": _cell("E1", None),
+            "A2": generated,
+            "B2": _cell("B2", None),
+            "C2": _cell("C2", None),
+            "D2": rows,
+            "E2": _cell("E2", None),
+            "A3": _cell("A3", None),
+            "B3": _cell("B3", None),
+            "C3": _cell("C3", None),
+            "D3": _cell("D3", None),
+            "E3": _cell("E3", None),
+            "A4": header,
+            "B4": _cell("B4", None),
+            "C4": _cell("C4", None),
+            "D4": _cell("D4", None),
+            "E4": _cell("E4", None),
+            "A5": content,
+            "B5": _cell("B5", None),
+            "C5": _cell("C5", None),
+            "D5": _cell("D5", None),
+            "E5": _cell("E5", None),
+        },
+        dims="A1:E5",
+    )
+    schema["sheets"][0]["merged_regions"] = ["A1:E1", "A2:C2", "D2:E2"]
+    schema["sheets"][0]["column_widths"] = {
+        "A": 12.0,
+        "B": 28.0,
+        "C": 18.0,
+        "D": 14.0,
+        "E": 16.0,
+    }
+    schema["sheets"][0]["row_heights"] = {
+        "1": 36.0,
+        "2": 22.0,
+        "3": 8.0,
+        "4": 22.0,
+        "5": 18.0,
+    }
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "report_title": "Benchmark Report",
+                "generated_on": datetime.date(2024, 1, 1),
+                "row_count": 2,
+                "bench_data": polars.DataFrame(
+                    {
+                        "id": [1, 2],
+                        "name": ["A", "B"],
+                        "category": ["C", "D"],
+                        "value": [1.0, 2.0],
+                        "date": ["2024-01-01", "2024-01-02"],
+                    }
+                ),
+            }
+        },
+    )
+
+    assert bundle.report["sheets"][0]["dimensions"].startswith("A1:I")
+    plan = _fast_grid_plan(
+        bundle,
+        bundle.report["sheets"][0],
+        column_width_mode=None,
+        row_height_mode=None,
+        default_column_width=None,
+        default_row_height=None,
+        available_width=500,
+        repeat_dataframe_headers=False,
+    )
+
+    assert plan is not None
+    assert (plan["min_col"], plan["max_col"]) == (1, 5)
+
+
+def test_pdf_fast_grid_plan_falls_back_for_wrapped_text():
+    cell = _cell("A1", "line one\nline two")
+    cell["alignment"] = dict(cell["alignment"])
+    cell["alignment"]["wrap_text"] = True
+    bundle = mo_dataport.compile(_schema({"A1": cell}, dims="A1:A1"), {"Sheet1": {}})
+
+    plan = _fast_grid_plan(
+        bundle,
+        bundle.report["sheets"][0],
+        column_width_mode=None,
+        row_height_mode=None,
+        default_column_width=None,
+        default_row_height=None,
+        available_width=500,
+        repeat_dataframe_headers=False,
+    )
+
+    assert plan is None
+
+
+def test_pdf_fast_grid_plan_keeps_styled_blank_columns():
+    styled_blank = _cell("C1", None)
+    styled_blank["fill"] = {
+        "pattern_type": "solid",
+        "fg_color": "FFFF0000",
+        "bg_color": None,
+    }
+    bundle = mo_dataport.compile(
+        _schema({"A1": _cell("A1", "Visible"), "C1": styled_blank}, dims="A1:C1"),
+        {"Sheet1": {}},
+    )
+
+    plan = _fast_grid_plan(
+        bundle,
+        bundle.report["sheets"][0],
+        column_width_mode=None,
+        row_height_mode=None,
+        default_column_width=None,
+        default_row_height=None,
+        available_width=500,
+        repeat_dataframe_headers=False,
+    )
+
+    assert plan is not None
+    assert (plan["min_col"], plan["max_col"]) == (1, 3)
 
 
 def test_pdf_export_streams_dataframe_occupation_chunks(managed_tmp_dir: Path):
