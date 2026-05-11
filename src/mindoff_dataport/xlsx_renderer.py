@@ -20,8 +20,6 @@ from openpyxl.utils.cell import (
 )
 
 from .xlsx_builder import (
-    _apply_cell_styles,
-    _apply_cell_value,
     _apply_dimensions,
     _apply_hug_columns,
     _apply_hug_rows,
@@ -277,10 +275,7 @@ def _render_fidelity(
         ws = wb.create_sheet(title=sheet["name"])
         _apply_sheet_view(ws, sheet)
         _apply_dimensions(ws, sheet)
-        for cell_schema in cells.values():
-            cell = ws[cell_schema["coordinate"]]
-            _apply_cell_value(cell, cell_schema)
-            _apply_cell_styles(cell, cell_schema)
+        _write_fidelity_cells(ws, cells)
 
         _, _, max_col, max_row = _parse_dims(sheet["dimensions"])
 
@@ -345,21 +340,20 @@ def _expanded_cells(
     for cell in sheet["cells"].values():
         if _is_non_anchor_merged_cell(cell):
             continue
-        cells[_coord_indexes(cell["coordinate"])] = cell
+        cells[_coord_indexes(cell["coordinate"])] = dict(cell)  # type: ignore[arg-type]
 
     for anchor in sheet.get("dataframe_anchors", []):
-        anchor_cells = (
-            _header_cells(anchor)
+        anchor_entries = (
+            _header_cell_entries(anchor)
             if anchor["placeholder_type"] == "dataframe-header"
-            else _content_cells(
+            else _content_cell_entries(
                 bundle,
                 source_map,
                 anchor,
                 batch_size=streaming_chunk_rows,
             )
         )
-        for coord, cell in anchor_cells:
-            row_idx, col_idx = _coord_indexes(coord)
+        for row_idx, col_idx, cell in anchor_entries:
             cells[(row_idx, col_idx)] = cell
             for merge_range in _generated_cell_merges(anchor, row_idx, col_idx):
                 generated_regions.append(str(merge_range))
@@ -388,6 +382,49 @@ def _sheet_with_overrides(
         if value is not None:
             result[key] = value
     return result  # type: ignore[return-value]
+
+
+def _header_cell_entries(
+    anchor: dict[str, Any],
+) -> Iterator[tuple[int, int, CellSchema]]:
+    start_row = int(anchor["start_row"])
+    start_col = int(anchor["start_col"])
+    cell = anchor["cell"]
+    bold_font = dict(cell["font"])
+    bold_font["bold"] = True
+    for layout in _anchor_layouts(anchor):
+        col_idx = start_col + int(layout["start_col_offset"])
+        header_cell = dict(cell)
+        header_cell["coordinate"] = f"{get_column_letter(col_idx)}{start_row}"
+        header_cell["value"] = str(layout["name"])
+        header_cell["cell_type"] = "string"
+        header_cell["font"] = bold_font
+        header_cell["alignment"] = _layout_alignment(cell, layout)
+        _style_cache_key(header_cell)
+        yield start_row, col_idx, header_cell  # type: ignore[misc]
+
+
+def _content_cell_entries(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    anchor: dict[str, Any],
+    *,
+    batch_size: int,
+) -> Iterator[tuple[int, int, CellSchema]]:
+    start_row = int(anchor["start_row"])
+    start_col = int(anchor["start_col"])
+    template_cell = anchor["cell"]
+    source = source_map[anchor["source"]]
+    layouts = _anchor_layouts(anchor)
+    for row_offset, row_values in enumerate(_source_rows(bundle, source, batch_size=batch_size)):
+        row_idx = start_row + row_offset
+        for layout, value in zip(layouts, row_values):
+            col_idx = start_col + int(layout["start_col_offset"])
+            schema = dict(_cell_with_layout(template_cell, layout))
+            schema["coordinate"] = f"{get_column_letter(col_idx)}{row_idx}"
+            schema["value"] = value
+            schema["cell_type"] = _infer_cell_type(value)
+            yield row_idx, col_idx, schema  # type: ignore[misc]
 
 
 def _validate_streaming(
@@ -1935,6 +1972,24 @@ def _cached_style_array(ws, schema: CellSchema, theme_colors: list[str] | None =
     return cache[key]
 
 
+def _cell_write_value(schema: CellSchema) -> Any:
+    value = schema["value"]
+    if schema["cell_type"] == "date" and isinstance(value, str):
+        return datetime.datetime.fromisoformat(value)
+    return value
+
+
+def _write_fidelity_cells(
+    ws,
+    cells: dict[tuple[int, int], CellSchema],
+    theme_colors: list[str] | None = None,
+) -> None:
+    for row_idx, col_idx in sorted(cells):
+        schema = cells[(row_idx, col_idx)]
+        cell = ws.cell(row=row_idx, column=col_idx, value=_cell_write_value(schema))
+        cell._style = _cached_style_array(ws, schema, theme_colors)
+
+
 def _styled_write_only_cell(
     ws, schema: CellSchema, value: Any, theme_colors: list[str] | None = None
 ) -> WriteOnlyCell:
@@ -1944,10 +1999,7 @@ def _styled_write_only_cell(
 
 
 def _write_only_cell(ws, schema: CellSchema, theme_colors: list[str] | None = None) -> WriteOnlyCell:
-    value = schema["value"]
-    if schema["cell_type"] == "date" and isinstance(value, str):
-        value = datetime.datetime.fromisoformat(value)
-    cell = _styled_write_only_cell(ws, schema, value, theme_colors)
+    cell = _styled_write_only_cell(ws, schema, _cell_write_value(schema), theme_colors)
     return cell
 
 
@@ -2219,7 +2271,7 @@ def export_report_bundle(
             )
         if streaming_engine not in {None, "openpyxl"}:
             raise ValueError(
-                f"Unsupported streaming_engine '{streaming_engine}'. Expected 'openpyxl' or 'xlsxwriter'."
+                f"Unsupported streaming_engine '{streaming_engine}'. Fidelity XLSX export supports only 'openpyxl'."
             )
         _render_fidelity(
             bundle,

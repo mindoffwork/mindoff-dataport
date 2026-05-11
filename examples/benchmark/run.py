@@ -526,7 +526,22 @@ def _bench_xlsxwriter_direct(df_path: Path, n_rows: int, out: Path) -> None:
                 ws.write(row_idx, col_idx, val, dat_fmt)
 
 
-def _bench_mindoff_pdf(schema, df_path: Path, n_rows: int, out: Path) -> None:
+def _bench_mindoff_pdf_fidelity(schema, df_path: Path, n_rows: int, out: Path) -> None:
+    bundle_path = out.parent / "bundle"
+    t0 = perf_counter()
+    bundle = mo_dataport.compile(
+        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+    )
+    _BENCH_CTX.compile_s = perf_counter() - t0
+    mo_dataport.export(
+        bundle,
+        str(out),
+        format="pdf",
+        auto_delete_bundle=False,
+    )
+
+
+def _bench_mindoff_pdf_streaming(schema, df_path: Path, n_rows: int, out: Path) -> None:
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
@@ -617,15 +632,16 @@ def _xlsx_registry(schema) -> list[tuple[str, object, bool]]:
             partial(_bench_mindoff_xlsx_streaming_xlsxwriter, schema),
             _HAS_XLSXWRITER,
         ),
-        ("openpyxl â€“ manual styling", _bench_openpyxl_direct, _HAS_OPENPYXL),
-        ("xlsxwriter â€“ manual styling", _bench_xlsxwriter_direct, _HAS_XLSXWRITER),
+        ("openpyxl - manual styling", _bench_openpyxl_direct, _HAS_OPENPYXL),
+        ("xlsxwriter - manual styling", _bench_xlsxwriter_direct, _HAS_XLSXWRITER),
     ]
 
 
 def _pdf_registry(schema) -> list[tuple[str, object, bool]]:
     return [
-        ("mindoff export (PDF)", partial(_bench_mindoff_pdf, schema), True),
-        ("reportlab â€“ manual styling", _bench_reportlab_direct, _HAS_REPORTLAB),
+        ("mindoff fidelity (PDF)", partial(_bench_mindoff_pdf_fidelity, schema), True),
+        ("mindoff streaming (PDF)", partial(_bench_mindoff_pdf_streaming, schema), True),
+        ("reportlab - manual styling", _bench_reportlab_direct, _HAS_REPORTLAB),
     ]
 
 
@@ -769,6 +785,135 @@ def save_csv(results: list[BenchResult]) -> Path:
     return out
 
 
+def _mindoff_category(
+    mindoff_value: float, baseline_value: float, acceptable_ratio: float = 1.15
+) -> str:
+    if not (_is_valid_number(mindoff_value) and _is_valid_number(baseline_value)):
+        return "n/a"
+    if mindoff_value <= baseline_value:
+        return "winner"
+    # "acceptable" means mindoff is close enough to baseline when not winning.
+    if mindoff_value <= baseline_value * acceptable_ratio:
+        return "acceptable"
+    return "loser"
+
+
+def _format_metric_pair(
+    category: str, mindoff_value: float, baseline_value: float, unit: str
+) -> str:
+    if not (_is_valid_number(mindoff_value) and _is_valid_number(baseline_value)):
+        return f"{category} (-/-)"
+    return f"{category} ({mindoff_value:.3f}{unit}/{baseline_value:.3f}{unit})"
+
+
+def save_comparison_csv(results: list[BenchResult]) -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUTPUT_DIR / "comparison.csv"
+    completed = [
+        r for r in results if r.status == "completed" and r.rows > 0 and r.file_mb >= 0.0
+    ]
+    by_key = {(r.method, r.fmt, r.rows): r for r in completed}
+
+    comparisons = [
+        (
+            "xlsx-fidelity-vs-openpyxl",
+            ("mindoff fidelity (XLSX)", "xlsx", "mindoff"),
+            ("openpyxl - manual styling", "xlsx", "baseline"),
+        ),
+        (
+            "xlsx-streaming-openpyxl-vs-openpyxl",
+            ("mindoff streaming-openpyxl (XLSX)", "xlsx", "mindoff"),
+            ("openpyxl - manual styling", "xlsx", "baseline"),
+        ),
+        (
+            "xlsx-streaming-xlsxwriter-vs-xlsxwriter",
+            ("mindoff streaming-xlsxwriter (XLSX)", "xlsx", "mindoff"),
+            ("xlsxwriter - manual styling", "xlsx", "baseline"),
+        ),
+        (
+            "pdf-fidelity-vs-reportlab",
+            ("mindoff fidelity (PDF)", "pdf", "mindoff"),
+            ("reportlab - manual styling", "pdf", "baseline"),
+        ),
+        (
+            "pdf-streaming-vs-reportlab",
+            ("mindoff streaming (PDF)", "pdf", "mindoff"),
+            ("reportlab - manual styling", "pdf", "baseline"),
+        ),
+    ]
+
+    with open(out, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "scenario",
+                "format",
+                "rows",
+                "mindoff_method",
+                "baseline_method",
+                "speed_category",
+                "memory_category",
+                "file_size_category",
+                "overall_category",
+            ]
+        )
+        for scenario, left_meta, right_meta in comparisons:
+            left_method, fmt, _ = left_meta
+            right_method, _, _ = right_meta
+            rows_in_fmt = sorted({r.rows for r in completed if r.fmt == fmt})
+            for rows in rows_in_fmt:
+                left = by_key.get((left_method, fmt, rows))
+                right = by_key.get((right_method, fmt, rows))
+                if left is None or right is None:
+                    continue
+                speed_category = _mindoff_category(
+                    left.elapsed_s, right.elapsed_s, acceptable_ratio=1.25
+                )
+                memory_category = _mindoff_category(left.peak_mb, right.peak_mb)
+                file_category = _mindoff_category(left.file_mb, right.file_mb)
+                speed_display = _format_metric_pair(
+                    speed_category, left.elapsed_s, right.elapsed_s, "s"
+                )
+                memory_display = _format_metric_pair(
+                    memory_category, left.peak_mb, right.peak_mb, "MB"
+                )
+                file_display = _format_metric_pair(
+                    file_category, left.file_mb, right.file_mb, "MB"
+                )
+                categories = (speed_category, memory_category, file_category)
+                if "n/a" in categories:
+                    overall = "n/a"
+                elif "loser" in categories:
+                    if "winner" in categories or "acceptable" in categories:
+                        overall = "acceptable"
+                    else:
+                        overall = "loser"
+                elif "acceptable" in categories:
+                    overall = "acceptable"
+                else:
+                    overall = "winner"
+                loser_count = sum(
+                    category == "loser"
+                    for category in categories
+                )
+                if loser_count >= 2:
+                    overall = "loser"
+                w.writerow(
+                    [
+                        scenario,
+                        fmt,
+                        _format_rows(rows),
+                        left.method,
+                        right.method,
+                        speed_display,
+                        memory_display,
+                        file_display,
+                        overall,
+                    ]
+                )
+    return out
+
+
 # §7. Entrypoint
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run public benchmark.")
@@ -806,7 +951,7 @@ def _apply_cli_profile(args: argparse.Namespace) -> None:
 
     if args.quick:
         ACTIVE_XLSX_ROW_COUNTS = [1_000, 10_000]
-        ACTIVE_PDF_ROW_COUNTS = [1_000]
+        ACTIVE_PDF_ROW_COUNTS = [1_000, 10_000]
         ACTIVE_RUNS_PER_POINT = 1
         ACTIVE_RUN_TIMEOUT_S = 90
 
@@ -842,8 +987,10 @@ def main() -> None:
 
     results = run_benchmarks(schema)
     csv_path = save_csv(results)
+    comparison_path = save_comparison_csv(results)
 
     print(f"\nResults CSV:  {csv_path}")
+    print(f"Comparison CSV: {comparison_path}")
 
 
 if __name__ == "__main__":

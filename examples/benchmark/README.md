@@ -49,7 +49,8 @@ Primary claim:
 
 | Method | What it does |
 |---|---|
-| mindoff export | Template-driven PDF with pagination and print-break handling |
+| mindoff fidelity | Template-driven PDF export without explicit chunk override |
+| mindoff streaming | Template-driven PDF export with `streaming_chunk_rows` chunking |
 | reportlab - manual styling | Raw ReportLab report with the same visible title, subtitle, table, sizing, and styles hardcoded in Python code |
 
 > **Note on direct-library baselines:** "manual styling" methods hardcode every colour, border, font, row height, and column width directly in Python. They render the same visible benchmark report shape, but no template is read. These are the speed ceiling for pure writing with no design layer. Mindoff adds a compile step on top of this; that step is what converts the Excel template into styled output at runtime.
@@ -88,6 +89,9 @@ python examples/benchmark/run.py --full
 
 # Custom override
 python examples/benchmark/run.py --runs 3 --timeout 180
+
+# Guard: fail if fidelity XLSX is not a speed winner vs openpyxl at 1K/10K
+python examples/benchmark/assert_fidelity_speed.py
 ```
 
 If the template is missing, regenerate it first:

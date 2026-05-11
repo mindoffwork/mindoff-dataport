@@ -1,5 +1,6 @@
-ï»¿import mindoff_dataport
+import mindoff_dataport
 
+import openpyxl
 import pytest
 
 from mindoff_dataport import (
@@ -11,11 +12,11 @@ from mindoff_dataport import (
     repeat_records,
 )
 
-# Â§1. Constants & Exceptions
+# §1. Constants & Exceptions
 
-# Â§2. Classes and Sub Classes
+# §2. Classes and Sub Classes
 
-# Â§3. Private Helper Functions
+# §3. Private Helper Functions
 
 
 def _cell(coord: str, value: str) -> dict:
@@ -60,7 +61,7 @@ def _schema() -> dict:
     }
 
 
-# Â§4. Public Functions
+# §4. Public Functions
 
 
 def test_mo_dataport_namespace_exposes_bundle_first_aliases():
@@ -114,6 +115,59 @@ def test_export_rejects_xlsxwriter_for_fidelity(managed_tmp_dir):
         )
 
 
+def test_fidelity_defaults_to_openpyxl_engine(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+    out = managed_tmp_dir / "fidelity-default.xlsx"
+
+    mo_dataport.export(bundle, str(out), export_mode="fidelity")
+
+    wb = openpyxl.load_workbook(out, data_only=True)
+    assert wb["Sheet1"]["A1"].value == "Alice"
+    wb.close()
+
+
+def test_fidelity_accepts_explicit_openpyxl_engine(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+    out = managed_tmp_dir / "fidelity-openpyxl.xlsx"
+
+    mo_dataport.export(
+        bundle,
+        str(out),
+        export_mode="fidelity",
+        streaming_engine="openpyxl",
+    )
+
+    wb = openpyxl.load_workbook(out, data_only=True)
+    assert wb["Sheet1"]["A1"].value == "Alice"
+    wb.close()
+
+
+@pytest.mark.parametrize("engine", [None, "openpyxl", "xlsxwriter"])
+def test_streaming_allows_openpyxl_and_xlsxwriter_engines(managed_tmp_dir, engine):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+    out = managed_tmp_dir / f"streaming-{engine or 'default'}.xlsx"
+    options = {"export_mode": "streaming", "streaming_chunk_rows": 1}
+    if engine is not None:
+        options["streaming_engine"] = engine
+
+    paths = mo_dataport.export(bundle, str(out), **options)
+
+    assert isinstance(paths, list) and paths
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    assert wb["Sheet1"]["A1"].value == "Alice"
+    wb.close()
+
+
+def test_pdf_export_uses_default_renderer_path(managed_tmp_dir):
+    bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
+    out = managed_tmp_dir / "out.pdf"
+
+    mo_dataport.export(bundle, str(out), format="pdf")
+
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
 def test_streaming_rejects_unknown_streaming_engine(managed_tmp_dir):
     bundle = mo_dataport.compile(_schema(), {"Sheet1": {"name": "Alice"}})
 
@@ -126,4 +180,4 @@ def test_streaming_rejects_unknown_streaming_engine(managed_tmp_dir):
         )
 
 
-# Â§5. Entrypoints
+# §5. Entrypoints
