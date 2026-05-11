@@ -44,6 +44,7 @@ from mindoff_dataport.xlsx_renderer import (
     _xlsxwriter_format_props,
     _xlsxwriter_logical_border_sides,
     _xlsxwriter_pattern,
+    _xlsxwriter_vertical_alignment,
 )
 
 # §1. Constants & Exceptions
@@ -2161,6 +2162,24 @@ def test_pdf_table_style_pattern_fill_prefers_bg_then_fg_fallback():
     assert any(item[0] == "BACKGROUND" for item in commands)
 
 
+def test_pdf_table_style_preserves_supported_cell_styling():
+    cell = _cell("A1", "Styled")
+    cell["fill"] = {"pattern_type": "solid", "fg_color": "FF123456", "bg_color": None}
+    cell["alignment"] = dict(cell["alignment"])
+    cell["alignment"]["horizontal"] = "right"
+    cell["alignment"]["vertical"] = "center"
+    cell["borders"] = dict(cell["borders"])
+    cell["borders"]["bottom"] = {"style": "thin", "color": "FF654321"}
+    sheet = _schema({"A1": cell}, dims="A1:A1")["sheets"][0]
+
+    commands = _table_style(sheet, {(1, 1): cell}, 1, 1, 1, 1, _FontResolver()).getCommands()
+
+    assert ("ALIGN", (0, 0), (0, 0), "RIGHT") in commands
+    assert ("VALIGN", (0, 0), (0, 0), "MIDDLE") in commands
+    assert any(item[0] == "BACKGROUND" for item in commands)
+    assert any(item[0] == "LINEBELOW" for item in commands)
+
+
 def test_xlsxwriter_helper_mappings_cover_known_and_unknown_values():
     assert _xlsxwriter_pattern("solid") == 1
     assert _xlsxwriter_pattern("gray125") == 17
@@ -2172,6 +2191,8 @@ def test_xlsxwriter_helper_mappings_cover_known_and_unknown_values():
 
     assert _xlsxwriter_logical_border_sides({"reading_order": 2}) == {"start": "right", "end": "left"}
     assert _xlsxwriter_logical_border_sides({"reading_order": 1}) == {"start": "left", "end": "right"}
+    assert _xlsxwriter_vertical_alignment("center") == "vcenter"
+    assert _xlsxwriter_vertical_alignment("justify") == "vjustify"
 
     assert _xlsxwriter_color("FF112233") == "#112233"
     assert _xlsxwriter_color("theme:0:0.0") == "#FFFFFF"
@@ -2190,6 +2211,7 @@ def test_xlsxwriter_format_props_covers_pattern_and_border_variants():
     }
     cell["alignment"] = dict(cell["alignment"])
     cell["alignment"]["reading_order"] = 2
+    cell["alignment"]["vertical"] = "center"
     cell["borders"] = dict(cell["borders"])
     cell["borders"]["start"] = {"style": "thin", "color": "FF010203"}
     cell["borders"]["end"] = {"style": "medium", "color": "FF040506"}
@@ -2208,6 +2230,7 @@ def test_xlsxwriter_format_props_covers_pattern_and_border_variants():
     assert props["left"] == 2
     assert props["diag_type"] == 3
     assert props["num_format"] == "0.00"
+    assert props["valign"] == "vcenter"
 
 
 def test_xlsxwriter_format_props_drops_unresolvable_fill_colors():

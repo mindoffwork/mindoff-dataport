@@ -932,6 +932,132 @@ def test_streaming_xlsxwriter_writes_static_and_dataframe_sheets(
     wb.close()
 
 
+def test_streaming_xlsxwriter_preserves_vertical_alignment(
+    managed_tmp_dir: Path,
+):
+    title = _cell("A1", "Title")
+    title["alignment"] = dict(title["alignment"])
+    title["alignment"]["horizontal"] = "right"
+    title["alignment"]["vertical"] = "center"
+    anchor = _cell("A2", "{{rows:dataframe-content}}")
+    anchor["alignment"] = dict(anchor["alignment"])
+    anchor["alignment"]["horizontal"] = "right"
+    anchor["alignment"]["vertical"] = "center"
+    schema = _schema(
+        {
+            "A1": title,
+            "A2": anchor,
+        },
+        dims="A1:B2",
+        merges=["A1:B1"],
+    )
+
+    paths = _export_streaming(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"sku": ["A"], "qty": [1]})}},
+        managed_tmp_dir,
+        streaming_engine="xlsxwriter",
+    )
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert ws["A1"].alignment.horizontal == "right"
+    assert ws["A1"].alignment.vertical == "center"
+    assert ws["A2"].alignment.horizontal == "right"
+    assert ws["A2"].alignment.vertical == "center"
+    assert ws["B2"].alignment.horizontal == "right"
+    assert ws["B2"].alignment.vertical == "center"
+    wb.close()
+
+
+@pytest.mark.parametrize(
+    ("export_mode", "streaming_engine"),
+    [
+        ("fidelity", None),
+        ("streaming", "openpyxl"),
+        ("streaming", "xlsxwriter"),
+    ],
+)
+def test_xlsx_modes_preserve_supported_static_and_dataframe_styles(
+    managed_tmp_dir: Path,
+    export_mode: str,
+    streaming_engine: str | None,
+):
+    title = _cell("A1", "Title")
+    title["font"] = dict(title["font"])
+    title["font"]["bold"] = True
+    title["font"]["color"] = "FFFFFFFF"
+    title["fill"] = {"pattern_type": "solid", "fg_color": "FF123456", "bg_color": None}
+    title["alignment"] = dict(title["alignment"])
+    title["alignment"]["horizontal"] = "right"
+    title["alignment"]["vertical"] = "center"
+    title["borders"] = dict(title["borders"])
+    title["borders"]["bottom"] = {"style": "thin", "color": "FF654321"}
+    anchor = _cell("A2", "{{rows:dataframe-content}}")
+    anchor["alignment"] = dict(anchor["alignment"])
+    anchor["alignment"]["horizontal"] = "center"
+    anchor["alignment"]["vertical"] = "center"
+    anchor["fill"] = {"pattern_type": "solid", "fg_color": "FFEFEFEF", "bg_color": None}
+    schema = _schema(
+        {"A1": title, "A2": anchor},
+        dims="A1:B2",
+        merges=["A1:B1"],
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"sku": ["A"], "qty": [1]})}},
+    )
+    out = managed_tmp_dir / f"{export_mode}-{streaming_engine or 'default'}.xlsx"
+    options = {"export_mode": export_mode}
+    if streaming_engine is not None:
+        options["streaming_engine"] = streaming_engine
+    paths = mo_dataport.export(bundle, str(out), **options)
+    output_path = Path(paths[0]) if isinstance(paths, list) else out
+
+    wb = openpyxl.load_workbook(output_path, data_only=True)
+    ws = wb["Sheet1"]
+    assert ws["A1"].alignment.horizontal == "right"
+    assert ws["A1"].alignment.vertical == "center"
+    assert ws["A1"].fill.patternType == "solid"
+    assert ws["A1"].fill.fgColor.rgb == "FF123456"
+    assert ws["A1"].font.bold is True
+    assert ws["A1"].font.color.rgb == "FFFFFFFF"
+    assert ws["A1"].border.bottom.style == "thin"
+    assert ws["A1"].border.bottom.color.rgb == "FF654321"
+    assert ws["A2"].alignment.horizontal == "center"
+    assert ws["A2"].alignment.vertical == "center"
+    assert ws["B2"].alignment.horizontal == "center"
+    assert ws["B2"].alignment.vertical == "center"
+    assert ws["A2"].fill.fgColor.rgb == "FFEFEFEF"
+    assert ws["B2"].fill.fgColor.rgb == "FFEFEFEF"
+    wb.close()
+
+
+def test_streaming_xlsxwriter_fast_path_splits_workbooks(managed_tmp_dir: Path):
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}")}, dims="A1:B1")
+    df = polars.DataFrame({"sku": ["A", "B", "C"], "qty": [1, 2, 3]})
+
+    paths = _export_streaming(
+        schema,
+        {"Sheet1": {"rows": df}},
+        managed_tmp_dir,
+        streaming_engine="xlsxwriter",
+        max_rows_per_workbook=2,
+    )
+
+    with ZipFile(paths[0]) as zip_file:
+        assert zip_file.namelist() == ["filled.part001.xlsx", "filled.part002.xlsx"]
+        zip_file.extractall(path=managed_tmp_dir)
+
+    wb1 = openpyxl.load_workbook(managed_tmp_dir / "filled.part001.xlsx", data_only=True)
+    wb2 = openpyxl.load_workbook(managed_tmp_dir / "filled.part002.xlsx", data_only=True)
+    assert [wb1["Sheet1"]["A1"].value, wb1["Sheet1"]["B1"].value] == ["A", 1]
+    assert [wb1["Sheet1"]["A2"].value, wb1["Sheet1"]["B2"].value] == ["B", 2]
+    assert [wb2["Sheet1"]["A1"].value, wb2["Sheet1"]["B1"].value] == ["C", 3]
+    wb1.close()
+    wb2.close()
+
+
 def test_streaming_repeat_dataframe_occupation_merges(managed_tmp_dir: Path):
     schema = _schema(
         {
