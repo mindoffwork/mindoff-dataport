@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.5.0
 
 ### Enhancements
 - ♻ Reorganize example scripts and outputs ([#14](https://github.com/mindoffwork/mindoff-dataport/pull/14))
