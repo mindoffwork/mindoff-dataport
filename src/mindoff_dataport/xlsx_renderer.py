@@ -20,8 +20,6 @@ from openpyxl.utils.cell import (
 )
 
 from .xlsx_builder import (
-    _apply_cell_styles,
-    _apply_cell_value,
     _apply_dimensions,
     _apply_hug_columns,
     _apply_hug_rows,
@@ -277,10 +275,7 @@ def _render_fidelity(
         ws = wb.create_sheet(title=sheet["name"])
         _apply_sheet_view(ws, sheet)
         _apply_dimensions(ws, sheet)
-        for cell_schema in cells.values():
-            cell = ws[cell_schema["coordinate"]]
-            _apply_cell_value(cell, cell_schema)
-            _apply_cell_styles(cell, cell_schema)
+        _write_fidelity_cells(ws, cells)
 
         _, _, max_col, max_row = _parse_dims(sheet["dimensions"])
 
@@ -345,21 +340,20 @@ def _expanded_cells(
     for cell in sheet["cells"].values():
         if _is_non_anchor_merged_cell(cell):
             continue
-        cells[_coord_indexes(cell["coordinate"])] = cell
+        cells[_coord_indexes(cell["coordinate"])] = dict(cell)  # type: ignore[arg-type]
 
     for anchor in sheet.get("dataframe_anchors", []):
-        anchor_cells = (
-            _header_cells(anchor)
+        anchor_entries = (
+            _header_cell_entries(anchor)
             if anchor["placeholder_type"] == "dataframe-header"
-            else _content_cells(
+            else _content_cell_entries(
                 bundle,
                 source_map,
                 anchor,
                 batch_size=streaming_chunk_rows,
             )
         )
-        for coord, cell in anchor_cells:
-            row_idx, col_idx = _coord_indexes(coord)
+        for row_idx, col_idx, cell in anchor_entries:
             cells[(row_idx, col_idx)] = cell
             for merge_range in _generated_cell_merges(anchor, row_idx, col_idx):
                 generated_regions.append(str(merge_range))
@@ -388,6 +382,49 @@ def _sheet_with_overrides(
         if value is not None:
             result[key] = value
     return result  # type: ignore[return-value]
+
+
+def _header_cell_entries(
+    anchor: dict[str, Any],
+) -> Iterator[tuple[int, int, CellSchema]]:
+    start_row = int(anchor["start_row"])
+    start_col = int(anchor["start_col"])
+    cell = anchor["cell"]
+    bold_font = dict(cell["font"])
+    bold_font["bold"] = True
+    for layout in _anchor_layouts(anchor):
+        col_idx = start_col + int(layout["start_col_offset"])
+        header_cell = dict(cell)
+        header_cell["coordinate"] = f"{get_column_letter(col_idx)}{start_row}"
+        header_cell["value"] = str(layout["name"])
+        header_cell["cell_type"] = "string"
+        header_cell["font"] = bold_font
+        header_cell["alignment"] = _layout_alignment(cell, layout)
+        _style_cache_key(header_cell)
+        yield start_row, col_idx, header_cell  # type: ignore[misc]
+
+
+def _content_cell_entries(
+    bundle: ReportBundle,
+    source_map: dict[str, dict[str, Any]],
+    anchor: dict[str, Any],
+    *,
+    batch_size: int,
+) -> Iterator[tuple[int, int, CellSchema]]:
+    start_row = int(anchor["start_row"])
+    start_col = int(anchor["start_col"])
+    template_cell = anchor["cell"]
+    source = source_map[anchor["source"]]
+    layouts = _anchor_layouts(anchor)
+    for row_offset, row_values in enumerate(_source_rows(bundle, source, batch_size=batch_size)):
+        row_idx = start_row + row_offset
+        for layout, value in zip(layouts, row_values):
+            col_idx = start_col + int(layout["start_col_offset"])
+            schema = dict(_cell_with_layout(template_cell, layout))
+            schema["coordinate"] = f"{get_column_letter(col_idx)}{row_idx}"
+            schema["value"] = value
+            schema["cell_type"] = _infer_cell_type(value)
+            yield row_idx, col_idx, schema  # type: ignore[misc]
 
 
 def _validate_streaming(
@@ -726,6 +763,15 @@ def _write_xlsxwriter_streaming_sheet(
     max_col = plan["max_col"]
     if anchor is not None:
         max_col = max(max_col, anchor["start_col"] + max(_occupied_width(anchor) - 1, 0))
+        content_layouts = _xlsxwriter_content_layouts(
+            workbook,
+            anchor,
+            plan.get("theme_colors"),
+            min_col=plan["min_col"],
+            max_col=max_col,
+        )
+    else:
+        content_layouts = None
     wrote_content = False
     written_rows = 0
 
@@ -735,7 +781,7 @@ def _write_xlsxwriter_streaming_sheet(
         _write_xlsxwriter_static_row(workbook, worksheet, plan, row_idx, max_col)
         if anchor is not None and row_idx >= anchor["start_row"]:
             wrote_content = _fill_xlsxwriter_streaming_row(
-                workbook, worksheet, plan, anchor, content, row_idx
+                workbook, worksheet, plan, anchor, content, row_idx, content_layouts
             ) or wrote_content
         for merge_range in plan.get("generated_merges", {}).get(row_idx, []):
             _add_xlsxwriter_cell_range_merge(worksheet, merge_range)
@@ -745,7 +791,7 @@ def _write_xlsxwriter_streaming_sheet(
         row_idx = max(plan["max_row"] + 1, anchor["start_row"])
         while row_idx <= max_rows_per_workbook and not content["exhausted"]:
             wrote_content = _fill_xlsxwriter_streaming_row(
-                workbook, worksheet, plan, anchor, content, row_idx
+                workbook, worksheet, plan, anchor, content, row_idx, content_layouts
             ) or wrote_content
             if content["exhausted"]:
                 break
@@ -784,6 +830,7 @@ def _fill_xlsxwriter_streaming_row(
     anchor: dict[str, Any],
     content: dict[str, Any],
     row_idx: int,
+    content_layouts: list[dict[str, Any]] | None,
 ) -> bool:
     try:
         row_values = next(content["rows"])
@@ -793,6 +840,13 @@ def _fill_xlsxwriter_streaming_row(
 
     if plan["sheet"].get("row_height_mode", "fixed") == "fixed":
         _apply_fixed_dataframe_row_height_xlsxwriter(worksheet, plan["sheet"], anchor, row_idx)
+    if content_layouts is not None and _write_xlsxwriter_fast_content_row(
+        worksheet,
+        row_idx,
+        row_values,
+        content_layouts,
+    ):
+        return True
     for layout, value in zip(_anchor_layouts(anchor), row_values):
         for col_idx, cell_schema in _layout_row_cells(
             anchor,
@@ -814,6 +868,98 @@ def _fill_xlsxwriter_streaming_row(
         if merge_range is not None:
             _add_xlsxwriter_cell_range_merge(worksheet, merge_range)
     return True
+
+
+def _xlsxwriter_content_layouts(
+    workbook,
+    anchor: dict[str, Any],
+    theme_colors: list[str] | None,
+    *,
+    min_col: int,
+    max_col: int,
+) -> list[dict[str, Any]] | None:
+    layouts: list[dict[str, Any]] = []
+    for value_index, layout in enumerate(_anchor_layouts(anchor)):
+        occupation = int(layout["occupation"])
+        if occupation != 1:
+            return None
+        col_idx = int(anchor["start_col"]) + int(layout["start_col_offset"])
+        if col_idx < min_col or col_idx > max_col:
+            continue
+        schema = _cell_with_layout(anchor["cell"], layout)
+        layouts.append(
+            {
+                "col": col_idx - 1,
+                "format": _xlsxwriter_format(workbook, schema, theme_colors),
+                "value_index": value_index,
+            }
+        )
+    return layouts
+
+
+def _write_xlsxwriter_fast_content_row(
+    worksheet,
+    row_idx: int,
+    row_values: tuple[Any, ...],
+    layouts: list[dict[str, Any]],
+) -> bool:
+    if not layouts:
+        return False
+    row_zero = row_idx - 1
+    run_start = layouts[0]
+    run_values = [_xlsxwriter_cell_value(row_values[run_start["value_index"]])]
+    previous_col = run_start["col"]
+    previous_format = run_start["format"]
+
+    for layout in layouts[1:]:
+        value = _xlsxwriter_cell_value(row_values[layout["value_index"]])
+        if layout["col"] == previous_col + 1 and layout["format"] is previous_format:
+            run_values.append(value)
+            previous_col = layout["col"]
+            continue
+        _write_xlsxwriter_value_run(
+            worksheet,
+            row_zero,
+            run_start["col"],
+            run_values,
+            previous_format,
+        )
+        run_start = layout
+        run_values = [value]
+        previous_col = layout["col"]
+        previous_format = layout["format"]
+
+    _write_xlsxwriter_value_run(
+        worksheet,
+        row_zero,
+        run_start["col"],
+        run_values,
+        previous_format,
+    )
+    return True
+
+
+def _write_xlsxwriter_value_run(
+    worksheet,
+    row: int,
+    col: int,
+    values: list[Any],
+    cell_format,
+) -> None:
+    if len(values) == 1:
+        value = values[0]
+        if value is None:
+            worksheet.write_blank(row, col, None, cell_format)
+        else:
+            worksheet.write(row, col, value, cell_format)
+        return
+    worksheet.write_row(row, col, values, cell_format)
+
+
+def _xlsxwriter_cell_value(value: Any) -> Any:
+    if isinstance(value, str) and _infer_cell_type(value) == "date":
+        return datetime.datetime.fromisoformat(value)
+    return value
 
 
 def _apply_fixed_dataframe_row_height_xlsxwriter(
@@ -1045,7 +1191,9 @@ def _xlsxwriter_format_props(
     if alignment.get("horizontal"):
         props["align"] = alignment["horizontal"]
     if alignment.get("vertical"):
-        props["valign"] = alignment["vertical"]
+        vertical = _xlsxwriter_vertical_alignment(alignment["vertical"])
+        if vertical is not None:
+            props["valign"] = vertical
     if alignment.get("wrap_text"):
         props["text_wrap"] = True
     if alignment.get("indent") is not None:
@@ -1119,6 +1267,16 @@ def _xlsxwriter_logical_border_sides(alignment: dict[str, Any]) -> dict[str, str
     if alignment.get("reading_order") == 2:
         return {"start": "right", "end": "left"}
     return {"start": "left", "end": "right"}
+
+
+def _xlsxwriter_vertical_alignment(value: str | None) -> str | None:
+    return {
+        "top": "top",
+        "center": "vcenter",
+        "bottom": "bottom",
+        "justify": "vjustify",
+        "distributed": "vdistributed",
+    }.get(value)
 
 
 def _xlsxwriter_border_style(style: str | None) -> int | None:
@@ -1814,6 +1972,24 @@ def _cached_style_array(ws, schema: CellSchema, theme_colors: list[str] | None =
     return cache[key]
 
 
+def _cell_write_value(schema: CellSchema) -> Any:
+    value = schema["value"]
+    if schema["cell_type"] == "date" and isinstance(value, str):
+        return datetime.datetime.fromisoformat(value)
+    return value
+
+
+def _write_fidelity_cells(
+    ws,
+    cells: dict[tuple[int, int], CellSchema],
+    theme_colors: list[str] | None = None,
+) -> None:
+    for row_idx, col_idx in sorted(cells):
+        schema = cells[(row_idx, col_idx)]
+        cell = ws.cell(row=row_idx, column=col_idx, value=_cell_write_value(schema))
+        cell._style = _cached_style_array(ws, schema, theme_colors)
+
+
 def _styled_write_only_cell(
     ws, schema: CellSchema, value: Any, theme_colors: list[str] | None = None
 ) -> WriteOnlyCell:
@@ -1823,10 +1999,7 @@ def _styled_write_only_cell(
 
 
 def _write_only_cell(ws, schema: CellSchema, theme_colors: list[str] | None = None) -> WriteOnlyCell:
-    value = schema["value"]
-    if schema["cell_type"] == "date" and isinstance(value, str):
-        value = datetime.datetime.fromisoformat(value)
-    cell = _styled_write_only_cell(ws, schema, value, theme_colors)
+    cell = _styled_write_only_cell(ws, schema, _cell_write_value(schema), theme_colors)
     return cell
 
 
@@ -2098,7 +2271,7 @@ def export_report_bundle(
             )
         if streaming_engine not in {None, "openpyxl"}:
             raise ValueError(
-                f"Unsupported streaming_engine '{streaming_engine}'. Expected 'openpyxl' or 'xlsxwriter'."
+                f"Unsupported streaming_engine '{streaming_engine}'. Fidelity XLSX export supports only 'openpyxl'."
             )
         _render_fidelity(
             bundle,

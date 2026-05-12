@@ -22,7 +22,8 @@ import mindoff_dataport as mo_dataport
 HERE = Path(__file__).resolve().parent
 TEMPLATE_XLSX = HERE / "template.xlsx"
 DATA_PARQUET = HERE / "data.parquet"
-OUTPUT_XLSX = HERE / "output.xlsx"
+OUTPUT_OPENPYXL_XLSX = HERE / "output_openpyxl.xlsx"
+OUTPUT_XLSXWRITER_XLSX = HERE / "output_xlsxwriter.xlsx"
 
 
 def main() -> None:
@@ -49,9 +50,19 @@ def main() -> None:
     )
     mo_dataport.export(
         bundle,
-        str(OUTPUT_XLSX),
+        str(OUTPUT_OPENPYXL_XLSX),
         format="xlsx",
-        export_mode="fidelity",
+        export_mode="streaming",
+        streaming_engine="openpyxl",
+        column_width_mode="fixed",
+        row_height_mode="fixed",
+    )
+    mo_dataport.export(
+        bundle,
+        str(OUTPUT_XLSXWRITER_XLSX),
+        format="xlsx",
+        export_mode="streaming",
+        streaming_engine="xlsxwriter",
         column_width_mode="fixed",
         row_height_mode="fixed",
     )
@@ -59,7 +70,8 @@ def main() -> None:
     elapsed = perf_counter() - started
     print(f"Template: {TEMPLATE_XLSX}")
     print(f"Parquet:  {DATA_PARQUET}")
-    print(f"Output:   {OUTPUT_XLSX}")
+    print(f"Output (openpyxl):   {OUTPUT_OPENPYXL_XLSX}")
+    print(f"Output (xlsxwriter): {OUTPUT_XLSXWRITER_XLSX}")
     print(f"Bundle:   {bundle.path}")
     print(f"Elapsed:  {elapsed:.2f}s")
 
