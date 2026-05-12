@@ -5,10 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from mindoff_dataport import mo_dataport
+import mindoff_dataport as mo_dataport
 
 HERE = Path(__file__).resolve().parent
-TEMPLATE_XLSX = HERE / "template.xlsx"
+TEMPLATE = HERE / "template.xlsx"
 
 
 def _show_error(label: str, func) -> None:
@@ -19,7 +19,7 @@ def _show_error(label: str, func) -> None:
 
 
 def main() -> None:
-    schema = mo_dataport.extract(str(TEMPLATE_XLSX))
+    schema = mo_dataport.extract(str(TEMPLATE))
 
     _show_error(
         "missing sheet",
