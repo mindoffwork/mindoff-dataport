@@ -111,6 +111,37 @@ mo_dataport.export(bundle, "invoice_filled.xlsx")
 mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 ```
 
+## Examples
+
+Clone the repo, install dependencies, then run any example directly:
+
+```bash
+git clone https://github.com/mindoffwork/mindoff-dataport
+cd mindoff-dataport
+pip install -e ".[polars]"
+```
+
+```bash
+python examples/<name>/run.py
+```
+
+Each example folder contains `template.xlsx`, `run.py`, and `data.parquet` (where applicable). Output files are written to `examples/<name>/output/` and are not tracked by git.
+
+| Example | What it shows |
+|---|---|
+| `basic/` | Minimal XLSX + PDF export from a parquet-backed template |
+| `bundle_path/` | Compile to a persistent bundle directory, export later |
+| `dataframe_options/` | Split `dataframe-header` / `dataframe-content` anchors with per-column occupation and alignment |
+| `dataframe_shift/` | `dataframe_shift="both"` — dataframe expands right and down inside repeat blocks |
+| `dynamic_sheets/` | One output sheet per data group using `{{key:sheet-name}}` expansion |
+| `input_discovery/` | Introspect required template inputs before building a payload |
+| `repeat_block/` | One repeat block per customer — per-block scalars and dataframes |
+| `repeat_dataframe_headers/` | `repeat_dataframe_headers=True` — repeat column headers across paginated PDF blocks |
+| `split_workbooks_streaming/` | `max_rows_per_workbook` — split large exports across multiple workbooks |
+| `style_showcase/` | Full style coverage (font, fill, alignment, borders) exported via openpyxl, xlsxwriter, and PDF |
+| `validation_errors/` | How validation errors surface before any file is written |
+| `benchmark/` | Runtime and memory benchmarks vs. raw openpyxl / xlsxwriter / ReportLab |
+
 ## 4. Core Concepts
 
 ### Workflow
