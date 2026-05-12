@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Enhancements
+- ♻ Reorganize example scripts and outputs ([#14](https://github.com/mindoffwork/mindoff-dataport/pull/14))
 - 🧪 Increase renderer and contract test coverage with lean branch tests ([#13](https://github.com/mindoffwork/mindoff-dataport/pull/13))
 - ⚡ Enhance PDF and XLSX rendering with new fast paths and tests ([#12](https://github.com/mindoffwork/mindoff-dataport/pull/12))
 
