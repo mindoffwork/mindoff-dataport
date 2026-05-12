@@ -5,7 +5,14 @@ import datetime
 import pytest
 
 from mindoff_dataport import mo_dataport
-from mindoff_dataport.template_contract import _infer_cell_type, get_template_inputs
+from mindoff_dataport.template_contract import (
+    _infer_cell_type,
+    _merge_placeholder_types,
+    _repeat_record_columns,
+    _substitute_scalars,
+    _to_headers,
+    get_template_inputs,
+)
 
 # §1. Constants & Exceptions
 
@@ -447,6 +454,55 @@ def test_infer_cell_type_date():
 
 def test_infer_cell_type_none():
     assert _infer_cell_type(None) == "empty"
+
+
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        ([{"name": "Alice"}], ["name"]),
+        ([], []),
+    ],
+)
+def test_repeat_record_columns_for_list_inputs(records, expected):
+    assert _repeat_record_columns(records) == expected
+
+
+def test_repeat_record_columns_returns_none_for_generic_iterable():
+    records = ({"name": name} for name in ["A", "B"])
+    assert _repeat_record_columns(records) is None
+
+
+def test_repeat_record_columns_rejects_invalid_type():
+    with pytest.raises(TypeError, match="must be a polars DataFrame/LazyFrame or iterable of dicts"):
+        _repeat_record_columns(123)
+
+
+def test_merge_placeholder_types_coalesces_dataframe_variants():
+    merged = _merge_placeholder_types(
+        {"rows": "dataframe-header"},
+        {"rows": "dataframe-content"},
+        "Sheet 1",
+    )
+    assert merged == {"rows": "dataframe"}
+
+
+def test_merge_placeholder_types_rejects_repeat_contract_conflict():
+    with pytest.raises(ValueError, match="Conflicting repeat placeholder contract"):
+        _merge_placeholder_types(
+            {"reports": [{"name": "string"}]},
+            {"reports": [{"name": "number"}]},
+            "Sheet 1",
+        )
+
+
+def test_substitute_scalars_whole_cell_and_inline_paths():
+    assert _substitute_scalars("{{count:number}}", {"count": 7}) == 7
+    assert _substitute_scalars("{{ignored:custom}} {{name:string}}", {"name": "Alice"}) == "{{ignored:custom}} Alice"
+
+
+def test_to_headers_rejects_non_polars_input():
+    with pytest.raises(TypeError, match="Expected a polars DataFrame or LazyFrame"):
+        _to_headers({"name": "Alice"})
 
 
 # §5. Entrypoints

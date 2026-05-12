@@ -20,25 +20,38 @@ from mindoff_dataport.pdf_renderer import (
     _column_widths,
     _data_source_map,
     _dataframe_pdf_rows,
+    _fast_grid_draw_border_line,
+    _fast_grid_extend_pending_grid,
     _fast_grid_plan,
+    _fast_grid_set_line_style,
+    _fast_grid_uniform_border_side,
     _hex_color,
     _paragraph,
+    _pdf_visible_column_bounds,
+    _prepare_chunk_rows,
     _repeat_record_rows,
+    _row_heights,
     _row_chunk_table,
+    _sheet_table,
     _sheet_flowables,
     _table_style,
 )
 from mindoff_dataport.xlsx_renderer import _expanded_cells
 from mindoff_dataport.xlsx_renderer import (
+    _anchor_layouts,
     _apply_merged_region_borders,
     _apply_streaming_dimensions,
     _delete_bundle_dir,
     _edge_border_schema_bounds,
     _merged_region_edge_schemas,
+    _occupied_width,
     _resolve_color_field,
     _resolved_borders,
     _resolved_fill,
     _resolved_font,
+    _source_repeat_binding,
+    _write_xlsxwriter_fast_content_row,
+    _xlsxwriter_value,
     _xlsxwriter_border_style,
     _xlsxwriter_color,
     _xlsxwriter_format_props,
@@ -2534,6 +2547,270 @@ def test_failed_export_preserves_bundle_directory(managed_tmp_dir: Path):
         )
 
     assert bundle_path.exists()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["theme:1", "theme:x:0.0", "theme:999:0.0", "GGGGGG"],
+)
+def test_pdf_hex_color_invalid_inputs_return_none(value):
+    assert _hex_color(value) is None
+
+
+def test_pdf_lazy_flowables_slice_delete_setitem_paths():
+    flowables = _LazyFlowables(["a", "b", "c"])
+    assert flowables[0:0] == []
+    del flowables[0:1]
+    flowables[0] = "B"
+    assert flowables[0] == "B"
+
+
+@pytest.mark.parametrize("mode", ["fixed", "even", "hug"])
+def test_pdf_column_widths_modes_scale_to_available_width(mode):
+    sheet = _schema_with_options(
+        {"A1": _cell("A1", "abcdefghij")},
+        dims="A1:A1",
+        column_width_mode=mode,
+        default_column_width=15.0,
+        column_widths={"A": 20.0},
+    )["sheets"][0]
+    cells = {(1, 1): sheet["cells"]["A1"]}
+    widths = _column_widths(sheet, cells, 1, 1, 1, 1, 70.0)
+    assert widths == [70.0]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("fixed", [22.0, 15.0]),
+        ("even", [18.0, 18.0]),
+        ("hug", [None, None]),
+    ],
+)
+def test_pdf_row_heights_modes(mode, expected):
+    sheet = _schema_with_options(
+        {"A1": _cell("A1", "x")},
+        dims="A1:A2",
+        row_height_mode=mode,
+        default_row_height=18.0,
+        row_heights={"1": 22.0},
+    )["sheets"][0]
+    assert _row_heights(sheet, 1, 2) == expected
+
+
+def test_pdf_visible_column_bounds_falls_back_to_dimensions():
+    sheet = _schema({}, dims="C1:E5")["sheets"][0]
+    assert _pdf_visible_column_bounds(sheet) == (3, 5)
+
+
+def test_pdf_prepare_chunk_rows_handles_missing_and_continued_headers():
+    rows = [
+        {
+            "is_dataframe_header_row": False,
+            "dataframe_content_sources": ["s1", "s2"],
+            "dataframe_content_start_sources": ["s2"],
+            "dataframe_header_rows_by_source": {"s1": {"is_dataframe_header_row": True}},
+        }
+    ]
+    prepared, repeat_rows = _prepare_chunk_rows(
+        rows,
+        repeat_dataframe_headers=True,
+        prepend_dataframe_headers=True,
+    )
+    assert len(prepared) == 2
+    assert repeat_rows == 1
+
+
+def test_pdf_fast_grid_uniform_border_side_negative_paths():
+    assert _fast_grid_uniform_border_side({"cells": {}, "merges": [1]}, 1, 1) is None
+    assert _fast_grid_uniform_border_side({"cells": {}, "merges": []}, 1, 1) is None
+    row = {
+        "cells": {
+            1: {
+                "borders": {
+                    "top": {"style": "thin", "color": "FF000000"},
+                    "bottom": {"style": "thin", "color": "FF000000"},
+                    "left": {"style": "thin", "color": "FF000000"},
+                    "right": {"style": "thin", "color": "FF000000"},
+                }
+            },
+            2: {
+                "borders": {
+                    "top": {"style": "thin", "color": "FF000000"},
+                    "bottom": {"style": "thin", "color": "FF000000"},
+                    "left": {"style": "thick", "color": "FF000000"},
+                    "right": {"style": "thin", "color": "FF000000"},
+                }
+            },
+        },
+        "merges": [],
+    }
+    assert _fast_grid_uniform_border_side(row, 1, 2) is None
+
+
+def test_pdf_fast_grid_extend_pending_grid_reuse_and_reset():
+    side = {"style": "thin", "color": "FF000000"}
+    x_positions = [0.0, 10.0]
+    pending = _fast_grid_extend_pending_grid(
+        None,
+        side=side,
+        x_positions=x_positions,
+        y_top=100.0,
+        y_bottom=90.0,
+    )
+    reused = _fast_grid_extend_pending_grid(
+        pending,
+        side=side,
+        x_positions=x_positions,
+        y_top=90.0,
+        y_bottom=80.0,
+    )
+    assert len(reused["y_positions"]) == 3
+    reset = _fast_grid_extend_pending_grid(
+        reused,
+        side={"style": "dashed", "color": "FF000000"},
+        x_positions=x_positions,
+        y_top=80.0,
+        y_bottom=70.0,
+    )
+    assert reset["y_positions"] == [80.0, 70.0]
+
+
+def test_xlsx_anchor_layouts_and_occupied_width_fallbacks():
+    anchor = {"columns": ["A", "B"], "start_col": 1}
+    assert _anchor_layouts(anchor) == [
+        {"name": "A", "start_col_offset": 0, "occupation": 1},
+        {"name": "B", "start_col_offset": 1, "occupation": 1},
+    ]
+    assert _occupied_width({"column_layouts": [], "columns": []}) == 0
+
+
+def test_xlsx_write_fast_content_row_false_and_true_paths():
+    class _Worksheet:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def write_row(self, row_zero, col_zero, values, fmt):
+            self.calls.append(("write_row", row_zero, col_zero, list(values), fmt))
+
+        def write(self, row_zero, col_zero, value, fmt):
+            self.calls.append(("write", row_zero, col_zero, value, fmt))
+
+    ws = _Worksheet()
+    assert _write_xlsxwriter_fast_content_row(ws, 2, (1,), []) is False
+
+    fmt_a = object()
+    fmt_b = object()
+    layouts = [
+        {"col": 0, "format": fmt_a, "value_index": 0},
+        {"col": 1, "format": fmt_a, "value_index": 1},
+        {"col": 3, "format": fmt_b, "value_index": 2},
+    ]
+    assert _write_xlsxwriter_fast_content_row(ws, 2, (10, 11, 12), layouts) is True
+    assert len(ws.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        (None, None),
+        (
+            {"cell_type": "date", "value": "2024-01-02T03:04:05"},
+            datetime.datetime(2024, 1, 2, 3, 4, 5),
+        ),
+        ({"cell_type": "string", "value": "x"}, "x"),
+    ],
+)
+def test_xlsxwriter_value_paths(schema, expected):
+    assert _xlsxwriter_value(schema) == expected
+
+
+def test_xlsx_source_repeat_binding_value_and_template_paths():
+    binding_direct = {
+        "row_offset": 0,
+        "start_col": 1,
+        "cell_template": {"cell_type": "string"},
+        "value": 9,
+    }
+    result_direct = _source_repeat_binding(binding_direct, {"name": "Alice"})
+    assert result_direct["value"] == 9
+
+    binding_template = {
+        "row_offset": 0,
+        "start_col": 1,
+        "cell_template": {"cell_type": "string"},
+        "value_template": "Hi {{name:string}}",
+    }
+    result_template = _source_repeat_binding(binding_template, {"name": "Alice"})
+    assert result_template["value"] == "Hi Alice"
+
+
+def test_pdf_sheet_table_builds_table_for_static_sheet():
+    schema = _schema({"A1": _cell("A1", "Title"), "B2": _cell("B2", "Value")}, dims="A1:B2")
+    bundle = mo_dataport.compile(schema, {"Sheet1": {}})
+    raw_sheet = bundle.report["sheets"][0]
+
+    table = _sheet_table(
+        bundle,
+        raw_sheet,
+        available_width=300.0,
+        column_width_mode=None,
+        row_height_mode=None,
+        default_column_width=None,
+        default_row_height=None,
+        streaming_chunk_rows=10,
+        font_resolver=_FontResolver(),
+    )
+
+    assert table is not None
+    assert len(table._cellvalues) == 2
+    assert len(table._cellvalues[0]) == 2
+
+
+def test_pdf_chunked_row_tables_emits_chunk_when_threshold_exceeded():
+    cell = _cell("A1", "x")
+    row_items = [
+        {"cells": {1: cell}, "merges": [{"min_row_offset": 0, "max_row_offset": 1, "min_col": 1, "max_col": 1}]},
+        {"cells": {1: cell}, "merges": []},
+    ]
+    tables = list(
+        _chunked_row_tables(
+            _schema({"A1": cell}, dims="A1:A2")["sheets"][0],
+            iter(row_items),
+            1,
+            1,
+            200.0,
+            _FontResolver(),
+            streaming_chunk_rows=1,
+        )
+    )
+    assert len(tables) >= 1
+
+
+def test_pdf_fast_grid_line_style_and_draw_border_line_paths():
+    class _Pdf:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def setLineWidth(self, value):
+            self.calls.append(("setLineWidth", value))
+
+        def setStrokeColor(self, value):
+            self.calls.append(("setStrokeColor", value))
+
+        def setDash(self, *args):
+            self.calls.append(("setDash", args))
+
+        def line(self, *args):
+            self.calls.append(("line", args))
+
+    pdf = _Pdf()
+    _fast_grid_set_line_style(pdf, {"style": "dashed", "color": "FF000000"})
+    _fast_grid_set_line_style(pdf, {"style": "dotted", "color": "FF000000"})
+    _fast_grid_set_line_style(pdf, {"style": "thin", "color": "FF000000"})
+    _fast_grid_draw_border_line(pdf, {"style": None, "color": "FF000000"}, 0, 0, 1, 1)
+    _fast_grid_draw_border_line(pdf, {"style": "thin", "color": "FF000000"}, 0, 0, 1, 1)
+    assert any(call[0] == "line" for call in pdf.calls)
 
 
 # §5. Entrypoints
