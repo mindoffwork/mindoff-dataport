@@ -1303,6 +1303,52 @@ def test_compile_rejects_template_merge_covering_dataframe_anchor():
         mo_dataport.compile(schema, {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}})
 
 
+def test_compile_rejects_straddling_merge_on_dataframe_anchor_row():
+    # Test case: merge straddles anchor row (starts before, extends into/past).
+    # Anchor at A2, dataframe is 2 rows wide, merge at A1:B3 (straddles row 2).
+    cells = {"A2": _cell("A2", "{{rows:dataframe-content}}")}
+    anchor = _cell("B2", None)
+    anchor["merged"] = True
+    anchor["merge_anchor"] = "A1"
+    cells["B2"] = anchor
+    cells["A1"] = _cell("A1", None)
+    cells["B1"] = _cell("B1", None)
+    cells["A3"] = _cell("A3", None)
+    cells["B3"] = _cell("B3", None)
+    schema = _schema(cells, dims="A1:B3")
+    # Merge from A1 to B3: includes row 2 (anchor) with row 1 before it => straddles.
+    schema["sheets"][0]["merged_regions"] = ["A1:B3"]
+
+    with pytest.raises(ValueError, match="must not overlap dataframe output"):
+        mo_dataport.compile(
+            schema,
+            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+            dataframe_shift="vertical",
+        )
+
+
+def test_compile_accepts_adjacent_non_straddling_merge_with_shift():
+    # Positive test: confirm the fix allows shifts even with complex templates.
+    # Non-straddling merge below a dataframe should be shifted correctly.
+    schema = _repeat_shift_regression_schema()
+
+    # This template has a merge A4:D4 that is between the two dataframes,
+    # not straddling either one. With our fix, this compiles successfully.
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"reports": _repeat_shift_regression_payload()}},
+        dataframe_options=_repeat_shift_regression_options(),
+        dataframe_shift="both",
+    )
+
+    # Verify it compiled successfully (bundle has a report attribute with sheets)
+    assert bundle.report is not None
+    assert len(bundle.report["sheets"]) == 1
+    # Verify the shift happened correctly (from prior test expectations)
+    record = bundle.report["sheets"][0]["repeat_sections"][0]["records"][0]
+    assert [anchor["start_row_offset"] for anchor in record["dataframe_anchors"]] == [1, 4]
+
+
 def test_compile_repeat_overlap_error_includes_dataframe_key_and_ranges():
     schema = _repeat_shift_regression_schema()
 
@@ -1970,6 +2016,39 @@ def test_pdf_sheet_flowables_insert_manual_page_break_for_streamed_dataframe_row
     )
 
     assert any(isinstance(item, PageBreak) for item in flowables)
+
+
+def test_pdf_sheet_flowables_split_streamed_dataframe_rows_to_fit_page_height():
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{rows:dataframe-content}}"),
+        },
+        dims="A1:A1",
+    )
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"A": list(range(60))})}},
+        dataframe_shift="vertical",
+    )
+
+    flowables = list(
+        _sheet_flowables(
+            bundle,
+            bundle.report["sheets"][0],
+            available_width=500,
+            available_height=100,
+            column_width_mode=None,
+            row_height_mode=None,
+            default_column_width=None,
+            default_row_height=None,
+            streaming_chunk_rows=200,
+            font_resolver=_FontResolver(),
+        )
+    )
+
+    tables = [item for item in flowables if hasattr(item, "_cellvalues")]
+    assert len(tables) > 1
+    assert max(len(table._cellvalues) for table in tables) <= 6
 
 
 def test_pdf_repeat_dataframe_headers_default_keeps_repeat_rows_disabled():

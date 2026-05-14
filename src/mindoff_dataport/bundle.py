@@ -490,6 +490,10 @@ def _compile_repeat_section(
     block_start = repeat["start_row"] + 1
     block_end = repeat["end_row"] - 1
     repeat_merges = _repeat_merged_regions(sheet, repeat, block_start, block_end)
+    _validate_repeat_template_no_straddling_merges(
+        sheet, block_start, block_end, repeat_merges,
+        dataframe_options, output_name, dataframe_shift,
+    )
     compiled_records: list[dict[str, Any]] = []
     block_height = max(block_end - block_start + 1, 0)
     max_col = _parse_dims(sheet["dimensions"])[2]
@@ -1299,6 +1303,64 @@ def _dataframe_shift_footprints(
     return footprints
 
 
+def _validate_repeat_template_no_straddling_merges(
+    sheet: SheetSchema,
+    block_start: int,
+    block_end: int,
+    repeat_merges: list[dict[str, Any]],
+    dataframe_options: dict[str, Any],
+    output_name: str,
+    dataframe_shift: str,
+) -> None:
+    if dataframe_shift == "none" or not repeat_merges:
+        return
+    # Collect anchor positions and column extents from template cells (pre-shift, pre-record)
+    template_anchors: list[dict[str, Any]] = []
+    for coord, cell in sheet["cells"].items():
+        row_idx, col_idx = _coord_indexes(coord)
+        if row_idx < block_start or row_idx > block_end:
+            continue
+        if cell.get("placeholder_type") not in {"dataframe", "dataframe-header", "dataframe-content"}:
+            continue
+        anchor_key = cell.get("placeholder_key", "")
+        col_layouts = (
+            dataframe_options.get(output_name, {})
+            .get(anchor_key, {})
+            .get("column_layouts", [])
+        )
+        width = _occupied_width(col_layouts)
+        if width <= 0:
+            continue
+        template_anchors.append({
+            "key": anchor_key,
+            "anchor_row": row_idx - block_start + 1,
+            "min_col": col_idx,
+            "max_col": col_idx + width - 1,
+        })
+    for merge in repeat_merges:
+        merge_range = CellRange(
+            min_col=merge["min_col"],
+            min_row=merge["min_row_offset"] + 1,
+            max_col=merge["max_col"],
+            max_row=merge["max_row_offset"] + 1,
+        )
+        for ta in template_anchors:
+            anchor_row = ta["anchor_row"]
+            if not (merge_range.min_row < anchor_row <= merge_range.max_row):
+                continue
+            col_overlap = (
+                merge_range.min_col <= ta["max_col"]
+                and merge_range.max_col >= ta["min_col"]
+            )
+            if col_overlap:
+                raise ValueError(
+                    f"Template merged region {merge_range} straddles the anchor row "
+                    f"(row {anchor_row}) of dataframe '{ta['key']}' and cannot be "
+                    f"safely shifted; end the merge before row {anchor_row} or "
+                    f"start it after."
+                )
+
+
 def _validate_dataframe_anchors_are_not_template_merged(
     sheet: dict[str, Any], footprints: list[dict[str, int]]
 ) -> None:
@@ -1313,17 +1375,16 @@ def _validate_dataframe_anchors_are_not_template_merged(
     for region in sheet["merged_regions"]:
         merge_range = CellRange(region)
         for anchor, output_range in anchors_with_ranges:
-            # Only reject merges that cover the anchor cell itself (the
-            # placeholder position). Rows/columns outside the anchor cell are
-            # template content that dataframe_shift will move out of the way;
-            # the post-shift validator catches any remaining overlaps.
+            # Reject merges that cover the anchor cell itself (placeholder position)
+            # or that straddle the anchor row (start before it, end at/after it).
+            # Both cases cannot be shifted and would corrupt dataframe output.
             anchor_cell = CellRange(
                 min_col=output_range.min_col,
                 min_row=output_range.min_row,
                 max_col=output_range.min_col,
                 max_row=output_range.min_row,
             )
-            if _ranges_overlap(merge_range, anchor_cell):
+            if _ranges_overlap(merge_range, anchor_cell) or _merge_straddles_anchor_row(merge_range, output_range):
                 raise ValueError(_merged_dataframe_overlap_error(anchor, merge_range, output_range))
 
 
@@ -1386,6 +1447,18 @@ def _range_is_below_footprint(
         region.min_col <= footprint["max_col"]
         and region.max_col >= footprint["start_col"]
         and region.min_row > footprint["start_row"]
+    )
+
+
+def _merge_straddles_anchor_row(merge_range: CellRange, output_range: CellRange) -> bool:
+    # Check if merge starts before anchor row and extends into/past it
+    anchor_row = output_range.min_row
+    if not (merge_range.min_row < anchor_row <= merge_range.max_row):
+        return False
+    # Also check if merge columns overlap output range columns
+    return (
+        merge_range.min_col <= output_range.max_col
+        and merge_range.max_col >= output_range.min_col
     )
 
 
