@@ -2747,8 +2747,8 @@ def test_xlsx_apply_streaming_dimensions_handles_fixed_and_even_modes():
     sheet_fixed["column_widths"] = {"A": 20.0, "B": None}
     sheet_fixed["row_heights"] = {"1": 30.0, "2": None}
     _apply_streaming_dimensions(ws, sheet_fixed)
-    assert ws.column_dimensions["A"].width == 20.0
-    assert ws.row_dimensions[1].height == 30.0
+    assert ws.column_dimensions["A"].width == pytest.approx(20.0)
+    assert ws.row_dimensions[1].height == pytest.approx(30.0)
 
     sheet_even = _schema({}, dims="A1:C3")["sheets"][0]
     sheet_even["column_width_mode"] = "even"
@@ -2756,8 +2756,8 @@ def test_xlsx_apply_streaming_dimensions_handles_fixed_and_even_modes():
     sheet_even["default_column_width"] = 11.0
     sheet_even["default_row_height"] = 13.0
     _apply_streaming_dimensions(ws, sheet_even)
-    assert ws.column_dimensions["C"].width == 11.0
-    assert ws.row_dimensions[3].height == 13.0
+    assert ws.column_dimensions["C"].width == pytest.approx(11.0)
+    assert ws.row_dimensions[3].height == pytest.approx(13.0)
 
 
 def test_xlsx_delete_bundle_dir_safety_guards(managed_tmp_dir: Path):
@@ -3193,13 +3193,22 @@ def test_pdf_fast_grid_line_style_and_draw_border_line_paths():
         def __init__(self) -> None:
             self.calls = []
 
-        def setLineWidth(self, value):
+        def __getattr__(self, name: str):
+            if name == "setLineWidth":
+                return self.set_line_width
+            if name == "setStrokeColor":
+                return self.set_stroke_color
+            if name == "setDash":
+                return self.set_dash
+            raise AttributeError(name)
+
+        def set_line_width(self, value):
             self.calls.append(("setLineWidth", value))
 
-        def setStrokeColor(self, value):
+        def set_stroke_color(self, value):
             self.calls.append(("setStrokeColor", value))
 
-        def setDash(self, *args):
+        def set_dash(self, *args):
             self.calls.append(("setDash", args))
 
         def line(self, *args):
