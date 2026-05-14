@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.6.0
 
 ### Enhancements
 - 🚀 Enhance dataframe shift handling and validation for merges ([#15](https://github.com/mindoffwork/mindoff-dataport/pull/15))
