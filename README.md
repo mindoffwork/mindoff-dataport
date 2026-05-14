@@ -38,11 +38,11 @@ Streaming mode holds near-constant peak memory regardless of dataset size. These
 
 Streaming reads Parquet in batches (default 50K rows) and writes incrementally. Peak RSS stays near-constant as row count scales. Raw library loops load the full dataset into memory before writing, so their peak RSS grows linearly with data.
 
-![XLSX export: export time and peak memory at scale](examples/benchmark/charts/benchmark_xlsx.png)
+![XLSX export: export time and peak memory at scale](https://github.com/mindoffwork/mindoff-dataport/blob/root/examples/benchmark/charts/benchmark_xlsx.png)
 
 **Fig. 1 — XLSX export.** Left: wall-clock time for all Mindoff modes — both streaming and fidelity scale O(n) linearly. Right: peak RSS — Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size. Fidelity is excluded from the memory panel because it is an in-memory mode intended for smaller outputs, not a fair memory comparison.
 
-![PDF export: export time and peak memory at scale](examples/benchmark/charts/benchmark_pdf.png)
+![PDF export: export time and peak memory at scale](https://github.com/mindoffwork/mindoff-dataport/blob/root/examples/benchmark/charts/benchmark_pdf.png)
 
 **Fig. 2 — PDF export.** Left: wall-clock time — linear O(n) scaling. Right: peak RSS — Mindoff streaming vs. ReportLab raw loop.
 
