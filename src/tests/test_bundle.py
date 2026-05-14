@@ -2265,6 +2265,7 @@ def test_pdf_repeat_dataframe_headers_with_manual_break_keeps_pagebreak_and_head
             1,
             1,
             500,
+            None,
             _FontResolver(),
             streaming_chunk_rows=10,
             page_breaks={2},
