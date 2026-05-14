@@ -86,6 +86,69 @@ def _export_streaming(schema, data, managed_tmp_dir: Path, **options):
     return mo_dataport.export(bundle, str(out), export_mode="streaming", **options)
 
 
+def _repeat_shift_regression_schema():
+    spacer = _cell("A4", "{{middle_label:string}}")
+    spacer["merged"] = True
+    spacer["merge_anchor"] = "A4"
+    shadow_cells = {}
+    for coord in ["B4", "C4", "D4"]:
+        shadow = _cell(coord, None)
+        shadow["merged"] = True
+        shadow["merge_anchor"] = "A4"
+        shadow_cells[coord] = shadow
+    return _schema(
+        {
+            "A1": _cell("A1", "{{reports:repeat-start}}"),
+            "A2": _cell("A2", "Section {{name:string}}"),
+            "A3": _cell("A3", "{{top_rows:dataframe-content}}"),
+            "A4": spacer,
+            **shadow_cells,
+            "A5": _cell("A5", "{{bottom_rows:dataframe-content}}"),
+            "A6": _cell("A6", "{{footer:string}}"),
+            "A7": _cell("A7", "{{reports:repeat-end}}"),
+        },
+        dims="A1:D7",
+        merges=["A4:D4"],
+    )
+
+
+def _repeat_shift_regression_data():
+    return {
+        "Sheet1": {
+            "reports": [
+                {
+                    "name": "Acme",
+                    "middle_label": "Spacer",
+                    "footer": "Done",
+                    "top_rows": polars.DataFrame(
+                        {"Item": ["Top 1", "Top 2"], "Amount": [10, 20]}
+                    ),
+                    "bottom_rows": polars.DataFrame(
+                        {"Item": ["Bottom 1"], "Amount": [30]}
+                    ),
+                }
+            ]
+        }
+    }
+
+
+def _repeat_shift_regression_options():
+    return {
+        "dataframe_options": {
+            "Sheet1": {
+                key: {
+                    "columns": {
+                        "Item": {"occupation": 2},
+                        "Amount": {"occupation": 2},
+                    }
+                }
+                for key in ["top_rows", "bottom_rows"]
+            }
+        },
+        "dataframe_shift": "both",
+    }
+
+
 # §4. Public Functions
 
 
@@ -388,7 +451,10 @@ def test_streaming_rejects_merged_regions_that_intersect_content(managed_tmp_dir
     )
     df = polars.DataFrame({"A": [1]})
 
-    with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
+    with pytest.raises(
+        ValueError,
+        match="dataframe 'rows' \\(dataframe-content\\).*merged region A1:B1.*output range A1",
+    ):
         _export_streaming(schema, {"Sheet1": {"rows": df}}, managed_tmp_dir)
 
 
@@ -1243,6 +1309,58 @@ def test_streaming_shifts_repeat_record_cells_around_dataframe_output(
         "A9:B9",
     ]
     wb.close()
+
+
+@pytest.mark.parametrize("engine", [None, "xlsxwriter"])
+def test_streaming_repeat_shift_moves_later_dataframe_anchors_and_merges(
+    managed_tmp_dir: Path,
+    engine: str | None,
+):
+    schema = _repeat_shift_regression_schema()
+    bundle = mo_dataport.compile(
+        schema,
+        _repeat_shift_regression_data(),
+        **_repeat_shift_regression_options(),
+    )
+    out = managed_tmp_dir / f"repeat-shift-{engine or 'openpyxl'}.xlsx"
+    export_options = {}
+    if engine is not None:
+        export_options["streaming_engine"] = engine
+
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming", **export_options)
+
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert [ws["A1"].value, ws["A2"].value, ws["A3"].value, ws["A4"].value] == [
+        "Section Acme",
+        "Top 1",
+        "Top 2",
+        "Spacer",
+    ]
+    assert [ws["A5"].value, ws["C5"].value, ws["A6"].value] == [
+        "Bottom 1",
+        30,
+        "Done",
+    ]
+    merged = {str(region) for region in ws.merged_cells.ranges}
+    assert "A4:D4" in merged
+    assert {"A2:B2", "C2:D2", "A3:B3", "C3:D3", "A5:B5", "C5:D5"} <= merged
+    wb.close()
+
+
+def test_pdf_exports_repeat_shifted_dataframe_layout(managed_tmp_dir: Path):
+    schema = _repeat_shift_regression_schema()
+    bundle = mo_dataport.compile(
+        schema,
+        _repeat_shift_regression_data(),
+        **_repeat_shift_regression_options(),
+    )
+    out = managed_tmp_dir / "repeat-shift.pdf"
+
+    mo_dataport.export(bundle, str(out), format="pdf", streaming_chunk_rows=1)
+
+    assert out.exists()
+    assert out.read_bytes().startswith(b"%PDF")
 
 
 def test_streaming_splits_repeat_records_across_parts(managed_tmp_dir: Path):
