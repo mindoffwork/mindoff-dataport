@@ -30,6 +30,39 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 6. **Runtime Layout Control Without Template Rework**  
    Fine-tune output layout programmatically without redesigning the original workbook.
 
+## Performance
+
+Streaming mode holds near-constant peak memory regardless of dataset size. These benchmarks compare it against raw openpyxl, xlsxwriter, and ReportLab loops with equivalent layout and styling — the most direct alternative.
+
+### Memory: O(1) streaming vs. O(n) raw loops
+
+Streaming reads Parquet in batches (default 50K rows) and writes incrementally. Peak RSS stays near-constant as row count scales. Raw library loops load the full dataset into memory before writing, so their peak RSS grows linearly with data.
+
+![XLSX export: export time and peak memory at scale](docs/benchmark/benchmark_xlsx.png)
+
+**Fig. 1 — XLSX export.** Left: wall-clock time for all Mindoff modes — both streaming and fidelity scale O(n) linearly. Right: peak RSS — Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size. Fidelity is excluded from the memory panel because it is an in-memory mode intended for smaller outputs, not a fair memory comparison.
+
+![PDF export: export time and peak memory at scale](docs/benchmark/benchmark_pdf.png)
+
+**Fig. 2 — PDF export.** Left: wall-clock time — linear O(n) scaling. Right: peak RSS — Mindoff streaming vs. ReportLab raw loop.
+
+### When to use each mode
+
+| Scenario | Mode | Why |
+|---|---|---|
+| ≤ 50K rows, full style fidelity | `export_mode="fidelity"` | Full merged-cell and style support; no streaming constraints |
+| > 50K rows, XLSX | `export_mode="streaming"` | Near-constant memory regardless of row count |
+| Any size, PDF | automatic | PDF always paginates; no `export_mode` setting needed |
+| > 1M rows, split output | `streaming` + `max_rows_per_workbook` | Splits output across multiple workbook files |
+
+### Methodology
+
+> **What is measured:** `compile()` + `export()`. Template `extract()` is excluded — it is a one-time cost.
+> **Metric:** median of 5 runs; shaded bands show ±1σ across runs.
+> **Data:** synthetic 5-column Parquet (int, str, str, float, date).
+> **Baselines:** raw openpyxl / xlsxwriter / ReportLab loops with identical layout and styling applied cell-by-cell.
+> **Reproduce:** `python examples/benchmark/run.py` — full results written to `examples/benchmark/output/results.csv` and `comparison.csv`.
+
 ## Documentation
 ### Table of Contents
 
@@ -258,7 +291,7 @@ bundle = compile_report_bundle(schema, payload)
 | `data`              | `dict[str, Any]`         | Yes      | Sheet-scoped payload. See [Data Contract](#data-contract)                                   |
 | `bundle_path`       | `str \| None`            | No       | If provided, writes the bundle as a directory at this path. Omit for in-memory only         |
 | `dataframe_options` | `dict[str, Any] \| None` | No       | Per-sheet, per-placeholder dataframe layout overrides. See [Dataframe Column Layout](#dataframe-column-layout) |
-| `dataframe_shift`   | `str`                    | No       | How normal-sheet template cells/merges move around dataframe output: `"both"`, `"horizontal"`, `"vertical"`, or `"none"` |
+| `dataframe_shift`   | `str`                    | No       | How template cells, merges, and later repeat-block dataframe anchors move around dataframe output: `"both"`, `"horizontal"`, `"vertical"`, or `"none"` |
 
 **Returns:** `ReportBundle`
 
@@ -501,7 +534,7 @@ bundle = mo_dataport.compile(
 | `"vertical"`   | Shift only cells/merges below dataframe output                                 |
 | `"none"`       | Do not shift; template merges that overlap dataframe output raise `ValueError` |
 
-The shift is metadata-only: dataframe rows remain in Parquet, `report.json` stores compact anchors, and streaming export still reads rows in batches. The same shifted bundle layout is used by XLSX and PDF. Repeat sections keep their stricter merge rules.
+The shift is metadata-only: dataframe rows remain in Parquet, `report.json` stores compact anchors, and streaming export still reads rows in batches. The same shifted bundle layout is used by XLSX and PDF, including later dataframe anchors inside repeat blocks. Repeat sections still reject merges that truly cannot be shifted clear of dataframe output.
 
 See `examples/dataframe_shift/xlsx.py` and `examples/dataframe_shift/pdf.py`.
 

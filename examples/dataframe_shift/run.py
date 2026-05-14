@@ -18,20 +18,24 @@ DATA = HERE / "data.parquet"
 
 
 def _report_payload(rows: pl.LazyFrame) -> list[dict]:
+    top_rows = rows.slice(0, 2)
+    bottom_rows = rows.slice(2, 1)
     return [
         {
             "customer_name": "Alpha Team",
             "region": "North",
-            "line_items": rows,
-            "note": "Shift right of dataframe",
-            "footer": "Shift below dataframe",
+            "line_items_top": top_rows,
+            "between_label": "Merged spacer row should shift with the first dataframe",
+            "line_items_bottom": bottom_rows,
+            "footer": "Second dataframe anchor should also shift",
         },
         {
             "customer_name": "Beta Team",
             "region": "South",
-            "line_items": rows,
-            "note": "Repeat block stays aligned",
-            "footer": "Footer follows dataframe rows",
+            "line_items_top": top_rows,
+            "between_label": "This record reproduces the same repeat-section issue",
+            "line_items_bottom": bottom_rows,
+            "footer": "With a fix, this section should compile cleanly",
         },
     ]
 
@@ -43,10 +47,28 @@ def main() -> None:
     schema = mo_dataport.extract(str(TEMPLATE))
     rows = pl.scan_parquet(DATA).select(["Employee", "Amount"])
 
-    # shift="both": dataframe expands right and down inside repeat blocks
+    # This example exercises stacked dataframe-content anchors inside one repeat
+    # block so both vertical shifting and merged spacer-row preservation are
+    # visible in the rendered output.
     bundle = mo_dataport.compile(
         schema,
         {"Shift Demo": {"reports": _report_payload(rows)}},
+        dataframe_options={
+            "Shift Demo": {
+                "line_items_top": {
+                    "columns": {
+                        "Employee": {"occupation": 1},
+                        "Amount": {"occupation": 1},
+                    }
+                },
+                "line_items_bottom": {
+                    "columns": {
+                        "Employee": {"occupation": 1},
+                        "Amount": {"occupation": 1},
+                    }
+                },
+            }
+        },
         dataframe_shift="both",
     )
     xlsx_out = mo_dataport.export(

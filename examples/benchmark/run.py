@@ -25,6 +25,7 @@ from datetime import date, timedelta
 from functools import partial
 from pathlib import Path
 from time import perf_counter, perf_counter_ns
+from typing import Any
 
 import polars as pl
 
@@ -68,6 +69,16 @@ try:
 except ImportError:
     _HAS_PSUTIL = False
 
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as _plt
+    import matplotlib.ticker as _ticker
+
+    _HAS_MATPLOTLIB = True
+except ImportError:
+    _HAS_MATPLOTLIB = False
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import mindoff_dataport as mo_dataport
 
@@ -81,10 +92,12 @@ TEMPLATE_PATH = HERE / "benchmark_template.xlsx"
 OUTPUT_DIR = HERE / "output"
 ARTIFACT_DIR = OUTPUT_DIR / "files"
 
-XLSX_ROW_COUNTS = [1_000, 10_000, 100_000, 500_000]
+# Streaming modes are tested to 500K; fidelity/direct modes cap at 100K (in-memory, not their use-case).
+XLSX_STREAMING_ROW_COUNTS = [1_000, 10_000, 100_000, 500_000]
+XLSX_FIDELITY_ROW_COUNTS = [1_000, 10_000, 100_000]
 PDF_ROW_COUNTS = [1_000, 5_000, 10_000]
 
-RUN_TIMEOUT_S = 120
+RUN_TIMEOUT_S = 300
 RUNS_PER_POINT = 5
 
 _COLS = ["id", "name", "category", "value", "date"]
@@ -98,8 +111,21 @@ _HUMAN_ROW_LABELS: dict[int, str] = {
     1_000_000: "1M",
 }
 
+_BENCH_TITLE = "Benchmark Report"
+
+# Method name constants — used in registries, chart series, and comparison CSV.
+_M_MO_XLSX_FIDELITY = "mindoff fidelity (XLSX)"
+_M_MO_XLSX_STREAM_OXL = "mindoff streaming-openpyxl (XLSX)"
+_M_MO_XLSX_STREAM_XLW = "mindoff streaming-xlsxwriter (XLSX)"
+_M_OXL_DIRECT = "openpyxl - manual styling"
+_M_XLW_DIRECT = "xlsxwriter - manual styling"
+_M_MO_PDF_FIDELITY = "mindoff fidelity (PDF)"
+_M_MO_PDF_STREAM = "mindoff streaming (PDF)"
+_M_RL_DIRECT = "reportlab - manual styling"
+
 # Runtime-configurable benchmark parameters (set by CLI in main()).
-ACTIVE_XLSX_ROW_COUNTS = XLSX_ROW_COUNTS
+ACTIVE_XLSX_STREAMING_ROW_COUNTS = XLSX_STREAMING_ROW_COUNTS
+ACTIVE_XLSX_FIDELITY_ROW_COUNTS = XLSX_FIDELITY_ROW_COUNTS
 ACTIVE_PDF_ROW_COUNTS = PDF_ROW_COUNTS
 ACTIVE_RUN_TIMEOUT_S = RUN_TIMEOUT_S
 ACTIVE_RUNS_PER_POINT = RUNS_PER_POINT
@@ -332,22 +358,132 @@ def _timed_runs(
 # Â§4. Benchmark Targets
 
 
-def _payload(df_path: Path, n_rows: int) -> dict[str, dict[str, object]]:
-    return {
-        "Benchmark": {
-            "report_title": "Benchmark Report",
-            "generated_on": date.today(),
-            "row_count": n_rows,
-            "bench_data": pl.scan_parquet(str(df_path)),
-        }
-    }
+def _scalar_value(key: str, expected_type: str, n_rows: int) -> Any:
+    lowered = key.lower()
+    if expected_type == "string":
+        if "title" in lowered:
+            return _BENCH_TITLE
+        return f"{key.replace('_', ' ').title()} sample"
+    if expected_type == "number":
+        if "count" in lowered or "rows" in lowered:
+            return n_rows
+        return max(1, n_rows // 10)
+    if expected_type == "int":
+        if "count" in lowered or "rows" in lowered:
+            return n_rows
+        return max(1, n_rows // 10)
+    if expected_type == "float":
+        return round(max(1, n_rows) * 1.25, 2)
+    if expected_type == "boolean":
+        return True
+    if expected_type == "date":
+        return date.today()
+    raise ValueError(f"Unsupported placeholder type: {expected_type}")
+
+
+def _dataframe_value(key: str, df_path: Path, n_rows: int) -> pl.LazyFrame:
+    base = pl.scan_parquet(str(df_path))
+    lowered = key.lower()
+
+    if "header" in lowered:
+        return base.select(
+            pl.lit(f"{key} field").alias("Field"),
+            pl.lit(f"{key} label").alias("Label"),
+            pl.int_range(1, pl.len() + 1).alias("Order"),
+        )
+
+    if "summary" in lowered or "total" in lowered:
+        return base.group_by("category").agg(
+            pl.len().alias("row_total"),
+            pl.col("value").sum().round(2).alias("value_total"),
+        ).sort("category")
+
+    if "detail" in lowered or "line" in lowered or "item" in lowered:
+        return base.select(
+            pl.col("id").alias(f"{key}_id"),
+            pl.col("name").alias(f"{key}_name"),
+            pl.col("value").alias(f"{key}_value"),
+            pl.col("date").alias(f"{key}_date"),
+        )
+
+    return base.select(
+        pl.col("id").alias(f"{key}_id"),
+        pl.concat_str(
+            [pl.lit(f"{key.upper()} "), pl.col("name")],
+            separator="",
+        ).alias(f"{key}_name"),
+        pl.col("category").alias(f"{key}_category"),
+        (pl.col("value") + pl.lit(len(key))).round(2).alias(f"{key}_value"),
+        pl.col("date").alias(f"{key}_date"),
+    )
+
+
+def _record_payload(
+    contract: dict[str, Any],
+    df_path: Path,
+    n_rows: int,
+    *,
+    repeat_index: int = 0,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, expected in contract.items():
+        if isinstance(expected, dict):
+            payload[key] = _record_payload(
+                expected,
+                df_path,
+                n_rows,
+                repeat_index=repeat_index,
+            )
+            continue
+        if isinstance(expected, list):
+            item_contract = expected[0] if expected else {}
+            payload[key] = [
+                _record_payload(
+                    item_contract,
+                    df_path,
+                    min(n_rows, 10) + repeat_index + item_idx,
+                    repeat_index=item_idx,
+                )
+                for item_idx in range(2)
+            ]
+            continue
+        if expected == "string":
+            payload[key] = (
+                f"{key.replace('_', ' ').title()} sample {repeat_index + 1}"
+                if repeat_index
+                else _scalar_value(key, expected, n_rows)
+            )
+            continue
+        if expected in {"number", "int"} and repeat_index:
+            payload[key] = repeat_index + 1
+            continue
+        if expected in {"dataframe", "dataframe-header", "dataframe-content"}:
+            dataframe_key = f"{key}_{repeat_index + 1}" if repeat_index else key
+            payload[key] = _dataframe_value(dataframe_key, df_path, n_rows)
+            continue
+        payload[key] = _scalar_value(key, expected, n_rows)
+    return payload
+
+
+def _payload(schema, df_path: Path, n_rows: int) -> dict[str, dict[str, object]]:
+    contract = mo_dataport.inputs(schema)
+    payload: dict[str, dict[str, object]] = {}
+    for sheet_name, sheet_contract in contract.items():
+        if isinstance(sheet_contract, dict) and "*" in sheet_contract:
+            payload[sheet_name] = {
+                "Preview A": _record_payload(sheet_contract["*"], df_path, n_rows),
+                "Preview B": _record_payload(sheet_contract["*"], df_path, n_rows // 2 or 1, repeat_index=1),
+            }
+            continue
+        payload[sheet_name] = _record_payload(sheet_contract, df_path, n_rows)
+    return payload
 
 
 def _bench_mindoff_xlsx_fidelity(schema, df_path: Path, n_rows: int, out: Path) -> None:
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
-        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+        schema, _payload(schema, df_path, n_rows), bundle_path=str(bundle_path)
     )
     _BENCH_CTX.compile_s = perf_counter() - t0
     mo_dataport.export(
@@ -361,7 +497,7 @@ def _bench_mindoff_xlsx_streaming_openpyxl(
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
-        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+        schema, _payload(schema, df_path, n_rows), bundle_path=str(bundle_path)
     )
     _BENCH_CTX.compile_s = perf_counter() - t0
     mo_dataport.export(
@@ -380,7 +516,7 @@ def _bench_mindoff_xlsx_streaming_xlsxwriter(
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
-        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+        schema, _payload(schema, df_path, n_rows), bundle_path=str(bundle_path)
     )
     _BENCH_CTX.compile_s = perf_counter() - t0
     mo_dataport.export(
@@ -402,7 +538,7 @@ def _bench_openpyxl_direct(df_path: Path, n_rows: int, out: Path) -> None:
         ws.column_dimensions[col].width = w
     ws.merge_cells("A1:E1")
     c = ws["A1"]
-    c.value = "Benchmark Report"
+    c.value = _BENCH_TITLE
     c.font = _Font(name="Calibri", size=14, bold=True, color="FFFFFFFF")
     c.fill = _Fill(patternType="solid", fgColor=_Color(rgb="FF1E3A5F"))
     c.alignment = _Align(horizontal="center", vertical="center")
@@ -512,7 +648,7 @@ def _bench_xlsxwriter_direct(df_path: Path, n_rows: int, out: Path) -> None:
         ws.set_column("C:C", 18)
         ws.set_column("D:D", 14)
         ws.set_column("E:E", 16)
-        ws.merge_range("A1:E1", "Benchmark Report", title_fmt)
+        ws.merge_range("A1:E1", _BENCH_TITLE, title_fmt)
         ws.set_row(0, 36)
         ws.merge_range("A2:C2", f"Generated: {date.today()}", sub_l_fmt)
         ws.merge_range("D2:E2", f"Rows: {n_rows}", sub_r_fmt)
@@ -530,7 +666,7 @@ def _bench_mindoff_pdf_fidelity(schema, df_path: Path, n_rows: int, out: Path) -
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
-        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+        schema, _payload(schema, df_path, n_rows), bundle_path=str(bundle_path)
     )
     _BENCH_CTX.compile_s = perf_counter() - t0
     mo_dataport.export(
@@ -545,7 +681,7 @@ def _bench_mindoff_pdf_streaming(schema, df_path: Path, n_rows: int, out: Path) 
     bundle_path = out.parent / "bundle"
     t0 = perf_counter()
     bundle = mo_dataport.compile(
-        schema, _payload(df_path, n_rows), bundle_path=str(bundle_path)
+        schema, _payload(schema, df_path, n_rows), bundle_path=str(bundle_path)
     )
     _BENCH_CTX.compile_s = perf_counter() - t0
     mo_dataport.export(
@@ -565,7 +701,7 @@ def _bench_reportlab_direct(df_path: Path, _n_rows: int, out: Path) -> None:
     col_widths = [w * scale for w in raw_col_widths]
     row_heights = [36.0, 22.0, 8.0, 22.0] + [18.0] * len(df)
     data = [
-        ["Benchmark Report", "", "", "", ""],
+        [_BENCH_TITLE, "", "", "", ""],
         [f"Generated: {date.today()}", "", "", f"Rows: {_n_rows}", ""],
         ["", "", "", "", ""],
         _COLS,
@@ -614,34 +750,39 @@ def _bench_reportlab_direct(df_path: Path, _n_rows: int, out: Path) -> None:
     ).build([table])
 
 
-# Â§5. Benchmark Orchestration
-def _xlsx_registry(schema) -> list[tuple[str, object, bool]]:
+# §5. Benchmark Orchestration
+# Registry tuples: (name, fn, available, row_counts)
+# Streaming modes run to 500K; fidelity/direct modes cap at 100K (in-memory, not their use-case).
+def _xlsx_registry(schema) -> list[tuple[str, object, bool, list[int]]]:
     return [
         (
-            "mindoff fidelity (XLSX)",
+            _M_MO_XLSX_FIDELITY,
             partial(_bench_mindoff_xlsx_fidelity, schema),
             True,
+            ACTIVE_XLSX_FIDELITY_ROW_COUNTS,
         ),
         (
-            "mindoff streaming-openpyxl (XLSX)",
+            _M_MO_XLSX_STREAM_OXL,
             partial(_bench_mindoff_xlsx_streaming_openpyxl, schema),
             True,
+            ACTIVE_XLSX_STREAMING_ROW_COUNTS,
         ),
         (
-            "mindoff streaming-xlsxwriter (XLSX)",
+            _M_MO_XLSX_STREAM_XLW,
             partial(_bench_mindoff_xlsx_streaming_xlsxwriter, schema),
             _HAS_XLSXWRITER,
+            ACTIVE_XLSX_STREAMING_ROW_COUNTS,
         ),
-        ("openpyxl - manual styling", _bench_openpyxl_direct, _HAS_OPENPYXL),
-        ("xlsxwriter - manual styling", _bench_xlsxwriter_direct, _HAS_XLSXWRITER),
+        (_M_OXL_DIRECT, _bench_openpyxl_direct, _HAS_OPENPYXL, ACTIVE_XLSX_FIDELITY_ROW_COUNTS),
+        (_M_XLW_DIRECT, _bench_xlsxwriter_direct, _HAS_XLSXWRITER, ACTIVE_XLSX_FIDELITY_ROW_COUNTS),
     ]
 
 
-def _pdf_registry(schema) -> list[tuple[str, object, bool]]:
+def _pdf_registry(schema) -> list[tuple[str, object, bool, list[int]]]:
     return [
-        ("mindoff fidelity (PDF)", partial(_bench_mindoff_pdf_fidelity, schema), True),
-        ("mindoff streaming (PDF)", partial(_bench_mindoff_pdf_streaming, schema), True),
-        ("reportlab - manual styling", _bench_reportlab_direct, _HAS_REPORTLAB),
+        (_M_MO_PDF_FIDELITY, partial(_bench_mindoff_pdf_fidelity, schema), True, ACTIVE_PDF_ROW_COUNTS),
+        (_M_MO_PDF_STREAM, partial(_bench_mindoff_pdf_streaming, schema), True, ACTIVE_PDF_ROW_COUNTS),
+        (_M_RL_DIRECT, _bench_reportlab_direct, _HAS_REPORTLAB, ACTIVE_PDF_ROW_COUNTS),
     ]
 
 
@@ -680,7 +821,7 @@ def run_benchmarks(schema) -> list[BenchResult]:
             print(f"  [{status.upper()}] {name} @ {n:,}: {detail}")
 
     print("\n=== XLSX runtime benchmarks (compile + export) ===")
-    for name, fn, available in _xlsx_registry(schema):
+    for name, fn, available, row_counts in _xlsx_registry(schema):
         if not available:
             print(f"  [SKIP] {name}")
             results.append(
@@ -696,11 +837,11 @@ def run_benchmarks(schema) -> list[BenchResult]:
                 )
             )
             continue
-        for n in ACTIVE_XLSX_ROW_COUNTS:
+        for n in row_counts:
             _run_one(name, fn, "xlsx", "xlsx", n, _make_parquet(n))
 
     print("\n=== PDF runtime benchmarks (compile + export) ===")
-    for name, fn, available in _pdf_registry(schema):
+    for name, fn, available, row_counts in _pdf_registry(schema):
         if not available:
             print(f"  [SKIP] {name}")
             results.append(
@@ -716,7 +857,7 @@ def run_benchmarks(schema) -> list[BenchResult]:
                 )
             )
             continue
-        for n in ACTIVE_PDF_ROW_COUNTS:
+        for n in row_counts:
             _run_one(name, fn, "pdf", "pdf", n, _make_parquet(n))
 
     return results
@@ -817,28 +958,28 @@ def save_comparison_csv(results: list[BenchResult]) -> Path:
     comparisons = [
         (
             "xlsx-fidelity-vs-openpyxl",
-            ("mindoff fidelity (XLSX)", "xlsx", "mindoff"),
-            ("openpyxl - manual styling", "xlsx", "baseline"),
+            (_M_MO_XLSX_FIDELITY, "xlsx", "mindoff"),
+            (_M_OXL_DIRECT, "xlsx", "baseline"),
         ),
         (
             "xlsx-streaming-openpyxl-vs-openpyxl",
-            ("mindoff streaming-openpyxl (XLSX)", "xlsx", "mindoff"),
-            ("openpyxl - manual styling", "xlsx", "baseline"),
+            (_M_MO_XLSX_STREAM_OXL, "xlsx", "mindoff"),
+            (_M_OXL_DIRECT, "xlsx", "baseline"),
         ),
         (
             "xlsx-streaming-xlsxwriter-vs-xlsxwriter",
-            ("mindoff streaming-xlsxwriter (XLSX)", "xlsx", "mindoff"),
-            ("xlsxwriter - manual styling", "xlsx", "baseline"),
+            (_M_MO_XLSX_STREAM_XLW, "xlsx", "mindoff"),
+            (_M_XLW_DIRECT, "xlsx", "baseline"),
         ),
         (
             "pdf-fidelity-vs-reportlab",
-            ("mindoff fidelity (PDF)", "pdf", "mindoff"),
-            ("reportlab - manual styling", "pdf", "baseline"),
+            (_M_MO_PDF_FIDELITY, "pdf", "mindoff"),
+            (_M_RL_DIRECT, "pdf", "baseline"),
         ),
         (
             "pdf-streaming-vs-reportlab",
-            ("mindoff streaming (PDF)", "pdf", "mindoff"),
-            ("reportlab - manual styling", "pdf", "baseline"),
+            (_M_MO_PDF_STREAM, "pdf", "mindoff"),
+            (_M_RL_DIRECT, "pdf", "baseline"),
         ),
     ]
 
@@ -914,7 +1055,266 @@ def save_comparison_csv(results: list[BenchResult]) -> Path:
     return out
 
 
-# §7. Entrypoint
+# §7. Charts
+# Time panel: all Mindoff modes — demonstrates linear O(n) scaling across modes.
+# Memory panel: streaming vs. raw-loop baselines only — fidelity excluded because it is an
+# in-memory mode intended for smaller outputs and comparing it on memory defeats the story.
+_CHART_SERIES = {
+    "xlsx": {
+        "time": [
+            (_M_MO_XLSX_STREAM_OXL, "#2563EB", "solid",  "Mindoff streaming · openpyxl"),
+            (_M_MO_XLSX_STREAM_XLW, "#7C3AED", "solid",  "Mindoff streaming · xlsxwriter"),
+            (_M_MO_XLSX_FIDELITY,   "#0EA5E9", "dashed", "Mindoff fidelity (openpyxl engine)"),
+        ],
+        # memory: list of (group_label, [(method, color, legend_label), ...])
+        # Each group is rendered as adjacent bars with a wider gap separating groups.
+        "memory": [
+            ("openpyxl engine", [
+                (_M_MO_XLSX_STREAM_OXL, "#2563EB", "Mindoff streaming · openpyxl"),
+                (_M_OXL_DIRECT,         "#DC2626", "openpyxl (raw loop)"),
+            ]),
+            ("xlsxwriter engine", [
+                (_M_MO_XLSX_STREAM_XLW, "#7C3AED", "Mindoff streaming · xlsxwriter"),
+                (_M_XLW_DIRECT,         "#EA580C", "xlsxwriter (raw loop)"),
+            ]),
+        ],
+    },
+    "pdf": {
+        "time": [
+            (_M_MO_PDF_STREAM,   "#2563EB", "solid",  "Mindoff streaming"),
+            (_M_MO_PDF_FIDELITY, "#0EA5E9", "dashed", "Mindoff fidelity"),
+        ],
+        "memory": [
+            ("", [
+                (_M_MO_PDF_STREAM, "#2563EB", "Mindoff streaming"),
+                (_M_RL_DIRECT,     "#DC2626", "ReportLab (raw loop)"),
+            ]),
+        ],
+    },
+}
+
+def save_charts(results: list[BenchResult]) -> list[Path]:
+    if not _HAS_MATPLOTLIB:
+        print("\n[charts] matplotlib not installed -- skipping chart generation")
+        return []
+
+    charts_dir = OUTPUT_DIR / "charts"
+    charts_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir = HERE.parents[1] / "docs" / "benchmark"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    completed = {
+        (r.method, r.fmt, r.rows): r
+        for r in results
+        if r.status == "completed" and r.rows > 0
+    }
+
+    _plt.rcParams.update({
+        "font.family": "sans-serif",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.edgecolor": "#CBD5E1",
+        "axes.linewidth": 0.8,
+        "xtick.color": "#475569",
+        "ytick.color": "#475569",
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "grid.color": "#E2E8F0",
+        "grid.linewidth": 0.7,
+        "legend.framealpha": 0.92,
+        "legend.edgecolor": "#E2E8F0",
+        "legend.fontsize": 8.5,
+    })
+
+    def _smart_y_fmt(v, _):
+        if v >= 1000:
+            return f"{v / 1000:,.1f}K"
+        if v >= 10:
+            return f"{v:,.0f}"
+        if v >= 1:
+            return f"{v:.1f}"
+        return f"{v:.2f}"
+
+    saved: list[Path] = []
+
+    for fmt, panels in _CHART_SERIES.items():
+        row_counts = sorted({r.rows for r in results if r.fmt == fmt and r.rows > 0})
+        if not row_counts:
+            continue
+
+        fig, (ax_time, ax_mem) = _plt.subplots(1, 2, figsize=(13, 6.5))
+        fig.patch.set_facecolor("#FFFFFF")
+        fig.suptitle(
+            f"mindoff-dataport  ·  {fmt.upper()} Export Performance",
+            fontsize=13, fontweight="bold", color="#1E3A5F", y=0.98,
+        )
+
+        x_labels = [_format_rows(n) for n in row_counts]
+
+        # Time panel: line chart — shows O(n) scaling trend across dataset sizes.
+        ax_time.set_facecolor("#FAFAFA")
+        ax_time.set_title(
+            "Export Time  ·  lower is better ↓",
+            fontsize=10.5, color="#1E3A5F", pad=10, fontweight="bold",
+        )
+        ax_time.set_xlabel("Dataset size (rows)", fontsize=9.5, color="#475569", labelpad=6)
+        ax_time.set_ylabel("Wall-clock time (s)", fontsize=9.5, color="#475569", labelpad=6)
+        ax_time.set_xscale("log")
+        ax_time.set_xticks(row_counts)
+        ax_time.set_xticklabels(x_labels)
+        ax_time.xaxis.set_minor_formatter(_ticker.NullFormatter())
+        ax_time.yaxis.set_major_formatter(_ticker.FuncFormatter(_smart_y_fmt))
+        ax_time.grid(axis="y", alpha=0.7)
+
+        time_plotted = False
+        _time_max = 0.0
+        for method, color, linestyle, label in panels["time"]:
+            xs, ys, errs = [], [], []
+            for n in row_counts:
+                r = completed.get((method, fmt, n))
+                if r is None:
+                    continue
+                xs.append(n)
+                ys.append(r.elapsed_s)
+                errs.append(r.elapsed_stdev_s if _is_valid_number(r.elapsed_stdev_s) else 0)
+            if not xs:
+                continue
+            time_plotted = True
+            _time_max = max(_time_max, max(ys))
+            is_mindoff = method.startswith("mindoff")
+            lw = 2.5 if is_mindoff else 1.8
+            zorder = 3 if is_mindoff else 2
+            marker = "o" if linestyle == "solid" else "s"
+            ms = 6 if is_mindoff else 5
+            ax_time.plot(
+                xs, ys,
+                color=color, linestyle=linestyle, linewidth=lw,
+                marker=marker, markersize=ms, label=label, zorder=zorder,
+                solid_capstyle="round",
+            )
+            lower = [max(0.0, y - e) for y, e in zip(ys, errs)]
+            upper = [y + e for y, e in zip(ys, errs)]
+            ax_time.fill_between(xs, lower, upper, color=color, alpha=0.11, zorder=zorder - 1)
+
+        if time_plotted:
+            ax_time.set_ylim(bottom=0, top=_time_max * 1.3)
+            ax_time.legend(loc="upper left")
+
+        # Memory panel: grouped bar chart — pairs of bars per engine, with a gap between groups.
+        # panels["memory"] is list of (group_label, [(method, color, legend_label), ...]).
+        mem_groups = panels["memory"]
+        x_pos = list(range(len(row_counts)))
+        n_groups = len(mem_groups)
+        group_sizes = [len(series) for _, series in mem_groups]
+        n_bars_total = sum(group_sizes)
+
+        # Geometry: each bar is bar_w wide; groups are separated by gap_w.
+        bar_w = 0.70 / max(n_bars_total + (n_groups - 1) * 0.5, 1)
+        gap_w = bar_w * 1.8
+
+        # Pre-compute per-bar center offsets from each x_pos integer.
+        total_span = n_bars_total * bar_w + max(n_groups - 1, 0) * gap_w
+        bar_offsets: list[float] = []
+        cursor = -total_span / 2.0 + bar_w / 2.0
+        for g_idx, (_, series_list) in enumerate(mem_groups):
+            for _ in series_list:
+                bar_offsets.append(cursor)
+                cursor += bar_w
+            cursor += gap_w
+
+        # Group center offsets (used for engine label annotations).
+        group_centers: list[float] = []
+        idx = 0
+        for _, series_list in mem_groups:
+            gc = (bar_offsets[idx] + bar_offsets[idx + len(series_list) - 1]) / 2.0
+            group_centers.append(gc)
+            idx += len(series_list)
+
+        ax_mem.set_facecolor("#FAFAFA")
+        ax_mem.set_title(
+            "Peak Memory Usage  ·  lower is better ↓",
+            fontsize=10.5, color="#1E3A5F", pad=10, fontweight="bold",
+        )
+        ax_mem.set_xlabel("Dataset size (rows)", fontsize=9.5, color="#475569", labelpad=6)
+        ax_mem.set_ylabel("Peak memory usage (MB)", fontsize=9.5, color="#475569", labelpad=6)
+        ax_mem.set_xticks(x_pos)
+        ax_mem.set_xticklabels(x_labels)
+        ax_mem.yaxis.set_major_formatter(_ticker.FuncFormatter(_smart_y_fmt))
+        ax_mem.grid(axis="y", alpha=0.7)
+
+        mem_plotted = False
+        _mem_max = 0.0
+        bar_idx = 0
+        for g_idx, (group_name, series_list) in enumerate(mem_groups):
+            for method, color, label in series_list:
+                offset = bar_offsets[bar_idx]
+                bar_idx += 1
+                xs_bar, ys_bar = [], []
+                for j, n in enumerate(row_counts):
+                    r = completed.get((method, fmt, n))
+                    if r is not None and _is_valid_number(r.peak_mb):
+                        xs_bar.append(x_pos[j] + offset)
+                        ys_bar.append(r.peak_mb)
+                if not xs_bar:
+                    continue
+                mem_plotted = True
+                _mem_max = max(_mem_max, max(ys_bar))
+                is_mindoff = method.startswith("mindoff")
+                ax_mem.bar(
+                    xs_bar, ys_bar, bar_w * 0.9,
+                    color=color, label=label,
+                    alpha=0.9 if is_mindoff else 0.7,
+                    zorder=2,
+                )
+                for xb, yb in zip(xs_bar, ys_bar):
+                    ax_mem.text(
+                        xb, yb, f"({_smart_y_fmt(yb, None)})",
+                        ha="center", va="bottom", fontsize=6.5,
+                        color="#334155", zorder=3,
+                    )
+
+        # Engine group labels below each cluster of bars.
+        for g_idx, (group_name, _) in enumerate(mem_groups):
+            if group_name:
+                for xp in x_pos:
+                    ax_mem.annotate(
+                        group_name,
+                        xy=(xp + group_centers[g_idx], 0),
+                        xytext=(0, -22),
+                        textcoords="offset points",
+                        ha="center", va="top",
+                        fontsize=7, color="#64748B",
+                        annotation_clip=False,
+                    )
+
+        if mem_plotted:
+            ax_mem.set_ylim(bottom=0, top=_mem_max * 1.35)
+            ax_mem.legend(loc="upper left", fontsize=8)
+
+        if not (time_plotted or mem_plotted):
+            _plt.close(fig)
+            continue
+
+        runs_note = (
+            f"Median of {ACTIVE_RUNS_PER_POINT} runs · ±1σ confidence bands on time panel · "
+            "compile + export only (extraction excluded) · "
+            "python examples/benchmark/run.py to reproduce"
+        )
+        fig.text(0.5, 0.01, runs_note, ha="center", fontsize=7.5, color="#94A3B8",
+                 fontstyle="italic")
+        fig.tight_layout(rect=[0, 0.06, 1, 0.93], pad=1.5, w_pad=3.0)
+
+        out_path = charts_dir / f"benchmark_{fmt}.png"
+        fig.savefig(str(out_path), dpi=130, bbox_inches="tight", pad_inches=0.3, facecolor="#FFFFFF")
+        shutil.copy2(str(out_path), str(docs_dir / out_path.name))
+        _plt.close(fig)
+        saved.append(out_path)
+        print(f"  [chart] {out_path.relative_to(OUTPUT_DIR.parent)}  ->  docs/benchmark/{out_path.name}")
+
+    return saved
+
+
+# §8. Entrypoint
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run public benchmark.")
     profile = parser.add_mutually_exclusive_group()
@@ -938,22 +1338,25 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _apply_cli_profile(args: argparse.Namespace) -> None:
-    global ACTIVE_XLSX_ROW_COUNTS
+    global ACTIVE_XLSX_STREAMING_ROW_COUNTS
+    global ACTIVE_XLSX_FIDELITY_ROW_COUNTS
     global ACTIVE_PDF_ROW_COUNTS
     global ACTIVE_RUNS_PER_POINT
     global ACTIVE_RUN_TIMEOUT_S
 
     # Default publish profile.
-    ACTIVE_XLSX_ROW_COUNTS = XLSX_ROW_COUNTS
+    ACTIVE_XLSX_STREAMING_ROW_COUNTS = XLSX_STREAMING_ROW_COUNTS
+    ACTIVE_XLSX_FIDELITY_ROW_COUNTS = XLSX_FIDELITY_ROW_COUNTS
     ACTIVE_PDF_ROW_COUNTS = PDF_ROW_COUNTS
     ACTIVE_RUNS_PER_POINT = RUNS_PER_POINT
     ACTIVE_RUN_TIMEOUT_S = RUN_TIMEOUT_S
 
     if args.quick:
-        ACTIVE_XLSX_ROW_COUNTS = [1_000, 10_000]
+        ACTIVE_XLSX_STREAMING_ROW_COUNTS = [1_000, 10_000]
+        ACTIVE_XLSX_FIDELITY_ROW_COUNTS = [1_000, 10_000]
         ACTIVE_PDF_ROW_COUNTS = [1_000, 10_000]
         ACTIVE_RUNS_PER_POINT = 1
-        ACTIVE_RUN_TIMEOUT_S = 90
+        ACTIVE_RUN_TIMEOUT_S = 120
 
     if args.runs is not None:
         ACTIVE_RUNS_PER_POINT = max(1, args.runs)
@@ -974,7 +1377,8 @@ def main() -> None:
     print(f"Output:   {OUTPUT_DIR}")
     print(
         "Profile:  "
-        f"xlsx_rows={[_format_rows(n) for n in ACTIVE_XLSX_ROW_COUNTS]}, "
+        f"xlsx_streaming={[_format_rows(n) for n in ACTIVE_XLSX_STREAMING_ROW_COUNTS]}, "
+        f"xlsx_fidelity={[_format_rows(n) for n in ACTIVE_XLSX_FIDELITY_ROW_COUNTS]}, "
         f"pdf_rows={[_format_rows(n) for n in ACTIVE_PDF_ROW_COUNTS]}, "
         f"runs={ACTIVE_RUNS_PER_POINT}, "
         f"warmup={'yes' if ACTIVE_RUNS_PER_POINT >= 3 else 'no'}, "
@@ -988,9 +1392,12 @@ def main() -> None:
     results = run_benchmarks(schema)
     csv_path = save_csv(results)
     comparison_path = save_comparison_csv(results)
+    chart_paths = save_charts(results)
 
-    print(f"\nResults CSV:  {csv_path}")
+    print(f"\nResults CSV:    {csv_path}")
     print(f"Comparison CSV: {comparison_path}")
+    if chart_paths:
+        print(f"Charts:         {', '.join(str(p) for p in chart_paths)}")
 
 
 if __name__ == "__main__":

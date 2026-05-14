@@ -567,7 +567,7 @@ def _compile_repeat_section(
             "cell_templates": cell_templates,
             "records": compiled_records,
         }
-    _validate_repeat_merges_do_not_overlap_dataframes(section)
+    _validate_repeat_merges_do_not_overlap_dataframes(section, dataframe_shift)
     return section, max_col
 
 
@@ -672,7 +672,7 @@ def _compile_source_repeat_section(
         "dataframe_anchors": record_anchors,
         "merged_record_regions": record_merges,
     }
-    _validate_repeat_merges_do_not_overlap_dataframes(section)
+    _validate_repeat_merges_do_not_overlap_dataframes(section, dataframe_shift)
     return section, max_col
 
 
@@ -907,9 +907,11 @@ def _shift_repeat_record_content_around_dataframes(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
     if dataframe_shift == "none":
         return record_cells, record_anchors, merged_regions, block_height
-    footprints = _repeat_dataframe_shift_footprints(record_anchors)
+    shifted_anchors, footprints = _shift_repeat_dataframe_anchors(
+        record_anchors, dataframe_shift=dataframe_shift
+    )
     if not footprints:
-        return record_cells, record_anchors, merged_regions, block_height
+        return record_cells, shifted_anchors, merged_regions, block_height
 
     merge_shifts: dict[tuple[int, int], tuple[int, int]] = {}
     shifted_merges: list[dict[str, Any]] = []
@@ -956,47 +958,78 @@ def _shift_repeat_record_content_around_dataframes(
         shifted_cells.append(shifted_item)
         max_row_offset = max(max_row_offset, row_offset + row_shift)
 
-    for anchor in record_anchors:
+    for anchor in shifted_anchors:
         output_range = _repeat_dataframe_output_range(anchor)
         if output_range is not None:
             max_row_offset = max(max_row_offset, output_range.max_row - 1)
 
-    return shifted_cells, record_anchors, shifted_merges, max_row_offset + 1
+    return shifted_cells, shifted_anchors, shifted_merges, max_row_offset + 1
 
 
-def _repeat_dataframe_shift_footprints(
-    anchors: list[dict[str, Any]],
-) -> list[dict[str, int]]:
-    grouped: dict[tuple[str, str, int], dict[str, int]] = {}
-    for anchor in anchors:
-        output_range = _repeat_dataframe_output_range(anchor)
-        if output_range is None:
+def _shift_repeat_dataframe_anchors(
+    anchors: list[dict[str, Any]], *, dataframe_shift: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    resolved_anchors: list[dict[str, Any]] = []
+    resolved_footprints: list[dict[str, Any]] = []
+    for anchor in sorted(
+        anchors,
+        key=lambda item: (
+            int(item["start_row_offset"]),
+            int(item["start_col"]),
+            str(item["coordinate"]),
+            str(item["key"]),
+            str(item["placeholder_type"]),
+        ),
+    ):
+        original_row_offset = int(anchor["start_row_offset"])
+        row_shift, col_shift = _shift_for_cell(
+            original_row_offset + 1,
+            int(anchor["start_col"]),
+            resolved_footprints,
+            dataframe_shift=dataframe_shift,
+        )
+        shifted_anchor = dict(anchor)
+        shifted_anchor["start_row_offset"] = original_row_offset + row_shift
+        shifted_anchor["start_col"] = int(anchor["start_col"]) + col_shift
+        resolved_anchors.append(shifted_anchor)
+        _extend_repeat_dataframe_shift_footprints(resolved_footprints, shifted_anchor, original_row_offset)
+    return resolved_anchors, resolved_footprints
+
+
+def _extend_repeat_dataframe_shift_footprints(
+    footprints: list[dict[str, Any]], anchor: dict[str, Any], original_row_offset: int
+) -> None:
+    output_range = _repeat_dataframe_output_range(anchor)
+    if output_range is None:
+        return
+    key = (anchor["coordinate"], anchor["key"], int(anchor["start_col"]))
+    # Use the original (pre-shift) row as the comparison baseline so that cells
+    # and merges below this anchor in the template are correctly identified even
+    # after earlier anchors have already pushed this anchor's shifted row far down.
+    original_start_row = original_row_offset + 1
+    row_delta = output_range.max_row - output_range.min_row  # source_rows - 1
+    for item in footprints:
+        if item["key"] != key:
             continue
-        key = (anchor["coordinate"], anchor["key"], int(anchor["start_col"]))
-        item = grouped.get(key)
-        if item is None:
-            grouped[key] = {
-                "start_row": output_range.min_row,
-                "start_col": output_range.min_col,
-                "max_row": output_range.max_row,
-                "max_col": output_range.max_col,
-                "row_delta": 0,
-                "col_delta": output_range.max_col - output_range.min_col,
-            }
-            continue
-        item["start_row"] = min(item["start_row"], output_range.min_row)
-        item["max_row"] = max(item["max_row"], output_range.max_row)
+        item["start_row"] = min(item["start_row"], original_start_row)
+        item["max_row"] = max(item["max_row"], original_start_row + row_delta)
         item["max_col"] = max(item["max_col"], output_range.max_col)
         item["col_delta"] = max(
             item["col_delta"], output_range.max_col - output_range.min_col
         )
-
-    footprints = list(grouped.values())
-    for item in footprints:
         item["row_delta"] = item["max_row"] - item["start_row"]
-    return footprints
-
-
+        return
+    footprints.append(
+        {
+            "key": key,
+            "start_row": original_start_row,
+            "start_col": output_range.min_col,
+            "max_row": original_start_row + row_delta,
+            "max_col": output_range.max_col,
+            "row_delta": row_delta,
+            "col_delta": output_range.max_col - output_range.min_col,
+        }
+    )
 def _compile_cell(
     *,
     cell: CellSchema,
@@ -1271,16 +1304,27 @@ def _validate_dataframe_anchors_are_not_template_merged(
 ) -> None:
     if not sheet.get("merged_regions"):
         return
+    anchors_with_ranges = [
+        (anchor, output_range)
+        for anchor in sheet.get("dataframe_anchors", [])
+        for output_range in [_dataframe_output_range(anchor)]
+        if output_range is not None
+    ]
     for region in sheet["merged_regions"]:
         merge_range = CellRange(region)
-        for footprint in footprints:
-            if (
-                merge_range.min_col <= footprint["start_col"] <= merge_range.max_col
-                and merge_range.min_row <= footprint["start_row"] <= merge_range.max_row
-            ):
-                raise ValueError(
-                    "Template merged regions must not overlap dataframe output ranges"
-                )
+        for anchor, output_range in anchors_with_ranges:
+            # Only reject merges that cover the anchor cell itself (the
+            # placeholder position). Rows/columns outside the anchor cell are
+            # template content that dataframe_shift will move out of the way;
+            # the post-shift validator catches any remaining overlaps.
+            anchor_cell = CellRange(
+                min_col=output_range.min_col,
+                min_row=output_range.min_row,
+                max_col=output_range.min_col,
+                max_row=output_range.min_row,
+            )
+            if _ranges_overlap(merge_range, anchor_cell):
+                raise ValueError(_merged_dataframe_overlap_error(anchor, merge_range, output_range))
 
 
 def _shift_for_range(
@@ -1393,24 +1437,22 @@ def _refresh_dimensions(sheet: dict[str, Any]) -> None:
 def _validate_template_merges_do_not_overlap_dataframes(sheet: dict[str, Any]) -> None:
     if not sheet.get("merged_regions"):
         return
-    dataframe_ranges = [
-        output_range
+    anchors_with_ranges = [
+        (anchor, output_range)
         for anchor in sheet.get("dataframe_anchors", [])
         for output_range in [_dataframe_output_range(anchor)]
         if output_range is not None
     ]
-    if not dataframe_ranges:
+    if not anchors_with_ranges:
         return
     for region in sheet["merged_regions"]:
         merge_range = CellRange(region)
-        for output_range in dataframe_ranges:
+        for anchor, output_range in anchors_with_ranges:
             if _ranges_overlap(merge_range, output_range):
-                raise ValueError(
-                    "Template merged regions must not overlap dataframe output ranges"
-                )
+                raise ValueError(_merged_dataframe_overlap_error(anchor, merge_range, output_range))
 
 
-def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any]) -> None:
+def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any], dataframe_shift: str = "both") -> None:
     if section.get("record_source"):
         record = {
             "dataframe_anchors": section.get("dataframe_anchors", []),
@@ -1440,10 +1482,32 @@ def _validate_repeat_merges_do_not_overlap_dataframes(section: dict[str, Any]) -
             if output_range is None:
                 continue
             for merge_range in merge_ranges:
-                if _ranges_overlap(merge_range, output_range):
-                    raise ValueError(
-                        "Template merged regions must not overlap dataframe output ranges"
+                if dataframe_shift == "none":
+                    # Without dataframe shift, merges cannot overlap the output range at all.
+                    if _ranges_overlap(merge_range, output_range):
+                        raise ValueError(_merged_dataframe_overlap_error(anchor, merge_range, output_range))
+                else:
+                    # With dataframe shift, only reject merges that overlap the anchor cell itself.
+                    # Merges below the anchor have been shifted by _shift_repeat_record_content_around_dataframes
+                    # and should not overlap the output range if the template is valid.
+                    anchor_cell = CellRange(
+                        min_col=output_range.min_col,
+                        min_row=output_range.min_row,
+                        max_col=output_range.min_col,
+                        max_row=output_range.min_row,
                     )
+                    if _ranges_overlap(merge_range, anchor_cell):
+                        raise ValueError(_merged_dataframe_overlap_error(anchor, merge_range, output_range))
+
+
+def _merged_dataframe_overlap_error(
+    anchor: dict[str, Any], merge_range: CellRange, output_range: CellRange
+) -> str:
+    return (
+        "Template merged regions must not overlap dataframe output ranges: "
+        f"dataframe '{anchor['key']}' ({anchor['placeholder_type']}) overlaps "
+        f"merged region {merge_range} with output range {output_range}"
+    )
 
 
 def _dataframe_output_range(anchor: dict[str, Any]) -> CellRange | None:
