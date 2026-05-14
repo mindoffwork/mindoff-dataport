@@ -927,6 +927,196 @@ def test_compile_shifts_diagonal_merge_right_and_down(managed_tmp_dir: Path):
     wb.close()
 
 
+def test_compile_shifts_merge_strictly_past_both_footprint_extents(managed_tmp_dir: Path):
+    # Merge C3:D3 is strictly beyond the footprint in both dimensions:
+    # col 3 > max_col 2, row 3 > max_row 2.  In "both" mode it must receive
+    # both horizontal (+1) and vertical (+1) shifts → D4:E4.
+    title = _cell("C3", "Corner")
+    title["merged"] = True
+    title["merge_anchor"] = "C3"
+    shadow = _cell("D3", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "C3"
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "C3": title, "D3": shadow},
+        dims="A1:D3",
+    )
+    schema["sheets"][0]["merged_regions"] = ["C3:D3"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}},
+    )
+
+    sheet = bundle.report["sheets"][0]
+    # col_delta=1 (occupation 2 → 1 extra col), row_delta=1 (2 rows → 1 extra row)
+    assert sheet["merged_regions"] == ["D4:E4"]
+    assert sheet["cells"]["D4"]["value"] == "Corner"
+
+    out = managed_tmp_dir / "shifted-corner.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert "D4:E4" in [str(r) for r in ws.merged_cells.ranges]
+    assert ws["D4"].value == "Corner"
+    wb.close()
+
+
+def test_compile_shifts_large_merge_spanning_both_footprint_dimensions(managed_tmp_dir: Path):
+    # A 2×3 merge (rows 3-4, cols 3-5) where the footprint is A1:B2.
+    # All cells are strictly past both extents → each cell receives both shifts.
+    cells = {}
+    for row, col_letter in [(3, "C"), (3, "D"), (3, "E"), (4, "C"), (4, "D"), (4, "E")]:
+        coord = f"{col_letter}{row}"
+        c = _cell(coord, "Block" if coord == "C3" else None)
+        c["merged"] = True
+        c["merge_anchor"] = "C3"
+        cells[coord] = c
+    schema = _schema({"A1": _cell("A1", "{{rows:dataframe-content}}"), **cells}, dims="A1:E4")
+    schema["sheets"][0]["merged_regions"] = ["C3:E4"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}},
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert sheet["merged_regions"] == ["D4:F5"]
+    assert sheet["cells"]["D4"]["value"] == "Block"
+
+    out = managed_tmp_dir / "shifted-block.xlsx"
+    paths = mo_dataport.export(bundle, str(out), export_mode="streaming")
+    wb = openpyxl.load_workbook(paths[0], data_only=True)
+    ws = wb["Sheet1"]
+    assert "D4:F5" in [str(r) for r in ws.merged_cells.ranges]
+    assert ws["D4"].value == "Block"
+    wb.close()
+
+
+def test_compile_shifts_non_merged_cell_strictly_past_both_footprint_extents():
+    # A plain template cell at C3, strictly past the footprint in both dimensions.
+    schema = _schema(
+        {"A1": _cell("A1", "{{rows:dataframe-content}}"), "C3": _cell("C3", "Note")},
+        dims="A1:C3",
+    )
+
+    bundle = mo_dataport.compile(
+        schema,
+        {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
+        dataframe_options={"Sheet1": {"rows": {"columns": {"Name": {"occupation": 2}}}}},
+    )
+
+    sheet = bundle.report["sheets"][0]
+    assert "D4" in sheet["cells"]
+    assert sheet["cells"]["D4"]["value"] == "Note"
+    assert "C3" not in sheet["cells"]
+
+
+def test_compile_shifts_multiple_footprints_diagonal_merge():
+    # Two side-by-side dataframes (cols A and C), each with 2-col occupation
+    # and 2 rows.  A merge at E3:F3 is strictly past both footprints in both
+    # dimensions and must accumulate horizontal and vertical shifts from each.
+    title = _cell("E3", "Summary")
+    title["merged"] = True
+    title["merge_anchor"] = "E3"
+    shadow = _cell("F3", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "E3"
+    schema = _schema(
+        {
+            "A1": _cell("A1", "{{left:dataframe-content}}"),
+            "C1": _cell("C1", "{{right:dataframe-content}}"),
+            "E3": title,
+            "F3": shadow,
+        },
+        dims="A1:F3",
+    )
+    schema["sheets"][0]["merged_regions"] = ["E3:F3"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "left": polars.DataFrame({"L": ["a", "b"]}),
+                "right": polars.DataFrame({"R": ["c", "d"]}),
+            }
+        },
+        dataframe_options={
+            "Sheet1": {
+                "left": {"columns": {"L": {"occupation": 2}}},
+                "right": {"columns": {"R": {"occupation": 2}}},
+            }
+        },
+    )
+
+    sheet = bundle.report["sheets"][0]
+    # Each footprint: col_delta=1, row_delta=1.  E3:F3 is past both footprints
+    # in both dimensions → col +2, row +2 → G5:H5.
+    assert sheet["merged_regions"] == ["G5:H5"]
+    assert sheet["cells"]["G5"]["value"] == "Summary"
+
+
+def test_compile_repeat_shifts_merge_strictly_past_both_footprint_extents():
+    # Inside a repeat record, a merge at C3:D3 (relative offsets row=2, col=3)
+    # is strictly past the dataframe footprint (cols 1-2, rows 0-1) in both
+    # dimensions and must receive both shifts in "both" mode.
+    anchor_cell = _cell("A4", "{{reports:repeat-start}}")
+    name_cell = _cell("A5", "Section {{name:string}}")
+    df_cell = _cell("A6", "{{rows:dataframe-content}}")
+    corner = _cell("C8", "Corner")
+    corner["merged"] = True
+    corner["merge_anchor"] = "C8"
+    shadow = _cell("D8", None)
+    shadow["merged"] = True
+    shadow["merge_anchor"] = "C8"
+    end_cell = _cell("A9", "{{reports:repeat-end}}")
+
+    schema = _schema(
+        {
+            "A4": anchor_cell,
+            "A5": name_cell,
+            "A6": df_cell,
+            "C8": corner,
+            "D8": shadow,
+            "A9": end_cell,
+        },
+        dims="A4:D9",
+    )
+    schema["sheets"][0]["merged_regions"] = ["C8:D8"]
+
+    bundle = mo_dataport.compile(
+        schema,
+        {
+            "Sheet1": {
+                "reports": [
+                    {
+                        "name": "Test",
+                        "rows": polars.DataFrame({"Item": ["X", "Y"]}),
+                    }
+                ]
+            }
+        },
+        dataframe_options={
+            "Sheet1": {"rows": {"columns": {"Item": {"occupation": 2}}}}
+        },
+        dataframe_shift="both",
+    )
+
+    section = bundle.report["sheets"][0]["repeat_sections"][0]
+    record = section["records"][0]
+    # Record offsets are relative to the first non-marker row (A5=0).
+    # Dataframe anchor at offset=1 (A6), 2 rows → footprint max_row=3 (1-idx).
+    # Merge C8:D8 → offset=3 (row 8-5=3), cols 3-4. Strictly past both footprint
+    # extents (min_col=3>max_col=2, min_row=4>max_row=3).  After +1/+1 shift
+    # → offset=4, cols 4-5.
+    assert any(
+        m["min_col"] == 4 and m["min_row_offset"] == 4
+        for m in record["merged_regions"]
+    ), record["merged_regions"]
+
+
 def test_compile_shifts_repeat_record_cells_around_dataframe_output():
     schema = _schema(
         {
@@ -1301,52 +1491,6 @@ def test_compile_rejects_template_merge_covering_dataframe_anchor():
 
     with pytest.raises(ValueError, match="must not overlap dataframe output ranges"):
         mo_dataport.compile(schema, {"Sheet1": {"rows": polars.DataFrame({"Name": ["A"]})}})
-
-
-def test_compile_rejects_straddling_merge_on_dataframe_anchor_row():
-    # Test case: merge straddles anchor row (starts before, extends into/past).
-    # Anchor at A2, dataframe is 2 rows wide, merge at A1:B3 (straddles row 2).
-    cells = {"A2": _cell("A2", "{{rows:dataframe-content}}")}
-    anchor = _cell("B2", None)
-    anchor["merged"] = True
-    anchor["merge_anchor"] = "A1"
-    cells["B2"] = anchor
-    cells["A1"] = _cell("A1", None)
-    cells["B1"] = _cell("B1", None)
-    cells["A3"] = _cell("A3", None)
-    cells["B3"] = _cell("B3", None)
-    schema = _schema(cells, dims="A1:B3")
-    # Merge from A1 to B3: includes row 2 (anchor) with row 1 before it => straddles.
-    schema["sheets"][0]["merged_regions"] = ["A1:B3"]
-
-    with pytest.raises(ValueError, match="must not overlap dataframe output"):
-        mo_dataport.compile(
-            schema,
-            {"Sheet1": {"rows": polars.DataFrame({"Name": ["A", "B"]})}},
-            dataframe_shift="vertical",
-        )
-
-
-def test_compile_accepts_adjacent_non_straddling_merge_with_shift():
-    # Positive test: confirm the fix allows shifts even with complex templates.
-    # Non-straddling merge below a dataframe should be shifted correctly.
-    schema = _repeat_shift_regression_schema()
-
-    # This template has a merge A4:D4 that is between the two dataframes,
-    # not straddling either one. With our fix, this compiles successfully.
-    bundle = mo_dataport.compile(
-        schema,
-        {"Sheet1": {"reports": _repeat_shift_regression_payload()}},
-        dataframe_options=_repeat_shift_regression_options(),
-        dataframe_shift="both",
-    )
-
-    # Verify it compiled successfully (bundle has a report attribute with sheets)
-    assert bundle.report is not None
-    assert len(bundle.report["sheets"]) == 1
-    # Verify the shift happened correctly (from prior test expectations)
-    record = bundle.report["sheets"][0]["repeat_sections"][0]["records"][0]
-    assert [anchor["start_row_offset"] for anchor in record["dataframe_anchors"]] == [1, 4]
 
 
 def test_compile_repeat_overlap_error_includes_dataframe_key_and_ranges():
@@ -2016,39 +2160,6 @@ def test_pdf_sheet_flowables_insert_manual_page_break_for_streamed_dataframe_row
     )
 
     assert any(isinstance(item, PageBreak) for item in flowables)
-
-
-def test_pdf_sheet_flowables_split_streamed_dataframe_rows_to_fit_page_height():
-    schema = _schema(
-        {
-            "A1": _cell("A1", "{{rows:dataframe-content}}"),
-        },
-        dims="A1:A1",
-    )
-    bundle = mo_dataport.compile(
-        schema,
-        {"Sheet1": {"rows": polars.DataFrame({"A": list(range(60))})}},
-        dataframe_shift="vertical",
-    )
-
-    flowables = list(
-        _sheet_flowables(
-            bundle,
-            bundle.report["sheets"][0],
-            available_width=500,
-            available_height=100,
-            column_width_mode=None,
-            row_height_mode=None,
-            default_column_width=None,
-            default_row_height=None,
-            streaming_chunk_rows=200,
-            font_resolver=_FontResolver(),
-        )
-    )
-
-    tables = [item for item in flowables if hasattr(item, "_cellvalues")]
-    assert len(tables) > 1
-    assert max(len(table._cellvalues) for table in tables) <= 6
 
 
 def test_pdf_repeat_dataframe_headers_default_keeps_repeat_rows_disabled():

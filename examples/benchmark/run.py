@@ -1098,10 +1098,8 @@ def save_charts(results: list[BenchResult]) -> list[Path]:
         print("\n[charts] matplotlib not installed -- skipping chart generation")
         return []
 
-    charts_dir = OUTPUT_DIR / "charts"
+    charts_dir = HERE / "charts"
     charts_dir.mkdir(parents=True, exist_ok=True)
-    docs_dir = HERE.parents[1] / "docs" / "benchmark"
-    docs_dir.mkdir(parents=True, exist_ok=True)
 
     completed = {
         (r.method, r.fmt, r.rows): r
@@ -1235,7 +1233,7 @@ def save_charts(results: list[BenchResult]) -> list[Path]:
             "Peak Memory Usage  ·  lower is better ↓",
             fontsize=10.5, color="#1E3A5F", pad=10, fontweight="bold",
         )
-        ax_mem.set_xlabel("Dataset size (rows)", fontsize=9.5, color="#475569", labelpad=6)
+        ax_mem.set_xlabel("Dataset size (rows)", fontsize=9.5, color="#475569", labelpad=22)
         ax_mem.set_ylabel("Peak memory usage (MB)", fontsize=9.5, color="#475569", labelpad=6)
         ax_mem.set_xticks(x_pos)
         ax_mem.set_xticklabels(x_labels)
@@ -1280,7 +1278,7 @@ def save_charts(results: list[BenchResult]) -> list[Path]:
                     ax_mem.annotate(
                         group_name,
                         xy=(xp + group_centers[g_idx], 0),
-                        xytext=(0, -22),
+                        xytext=(0, -14),
                         textcoords="offset points",
                         ha="center", va="top",
                         fontsize=7, color="#64748B",
@@ -1302,14 +1300,13 @@ def save_charts(results: list[BenchResult]) -> list[Path]:
         )
         fig.text(0.5, 0.01, runs_note, ha="center", fontsize=7.5, color="#94A3B8",
                  fontstyle="italic")
-        fig.tight_layout(rect=[0, 0.06, 1, 0.93], pad=1.5, w_pad=3.0)
+        fig.tight_layout(rect=[0, 0.10, 1, 0.93], pad=1.5, w_pad=3.0)
 
         out_path = charts_dir / f"benchmark_{fmt}.png"
         fig.savefig(str(out_path), dpi=130, bbox_inches="tight", pad_inches=0.3, facecolor="#FFFFFF")
-        shutil.copy2(str(out_path), str(docs_dir / out_path.name))
         _plt.close(fig)
         saved.append(out_path)
-        print(f"  [chart] {out_path.relative_to(OUTPUT_DIR.parent)}  ->  docs/benchmark/{out_path.name}")
+        print(f"  [chart] {out_path.relative_to(OUTPUT_DIR.parent)}")
 
     return saved
 

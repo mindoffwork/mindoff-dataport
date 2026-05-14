@@ -1116,6 +1116,7 @@ def _chunked_row_flowables(
     min_col: int,
     max_col: int,
     available_width: float,
+    available_height: float | None,
     font_resolver: _FontResolver,
     *,
     streaming_chunk_rows: int,
@@ -1141,6 +1142,7 @@ def _chunked_row_flowables(
         )
 
     chunk: list[dict[str, Any]] = []
+    chunk_height = 0.0
     previous_row_idx: int | None = None
     manual_breaks = page_breaks or set()
     prepend_dataframe_headers_on_next_chunk = False
@@ -1155,6 +1157,7 @@ def _chunked_row_flowables(
                 prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
             )
             chunk = []
+            chunk_height = 0.0
             prepend_dataframe_headers_on_next_chunk = False
         if chunk and previous_row_idx in manual_breaks:
             yield _emit_chunk(
@@ -1162,7 +1165,25 @@ def _chunked_row_flowables(
             )
             yield PageBreak()
             chunk = []
+            chunk_height = 0.0
             prepend_dataframe_headers_on_next_chunk = True
+        row_heights = _per_row_heights(sheet, [row_item], chunk_row_height)
+        row_height = (
+            float(row_heights[0])
+            if row_heights
+            else _DEFAULT_ROW_HEIGHT
+        )
+        if (
+            available_height is not None
+            and chunk
+            and chunk_height + row_height > available_height
+        ):
+            yield _emit_chunk(
+                prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
+            )
+            chunk = []
+            chunk_height = 0.0
+            prepend_dataframe_headers_on_next_chunk = False
         if (
             chunk
             and not repeat_dataframe_headers
@@ -1173,8 +1194,10 @@ def _chunked_row_flowables(
                 prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
             )
             chunk = []
+            chunk_height = 0.0
             prepend_dataframe_headers_on_next_chunk = False
         chunk.append(row_item)
+        chunk_height += row_height
         previous_row_idx = row_idx
     if chunk:
         yield _emit_chunk(
@@ -1229,6 +1252,7 @@ def _dataframe_sheet_flowables(
     raw_sheet: dict[str, Any],
     *,
     available_width: float,
+    available_height: float | None,
     column_width_mode: str | None,
     row_height_mode: str | None,
     default_column_width: float | None,
@@ -1263,6 +1287,7 @@ def _dataframe_sheet_flowables(
         min_col,
         max_col,
         available_width,
+        available_height,
         font_resolver,
         streaming_chunk_rows=streaming_chunk_rows,
         page_breaks=_resolved_row_page_breaks(sheet),
@@ -1276,6 +1301,7 @@ def _repeat_sheet_flowables(
     raw_sheet: dict[str, Any],
     *,
     available_width: float,
+    available_height: float | None,
     column_width_mode: str | None,
     row_height_mode: str | None,
     default_column_width: float | None,
@@ -1305,6 +1331,7 @@ def _repeat_sheet_flowables(
         min_col,
         max_col,
         available_width,
+        available_height,
         font_resolver,
         streaming_chunk_rows=streaming_chunk_rows,
         page_breaks=_resolved_row_page_breaks(sheet),
@@ -1317,6 +1344,7 @@ def _static_sheet_flowables(
     raw_sheet: dict[str, Any],
     *,
     available_width: float,
+    available_height: float | None,
     column_width_mode: str | None,
     row_height_mode: str | None,
     default_column_width: float | None,
@@ -1341,6 +1369,7 @@ def _static_sheet_flowables(
         min_col,
         max_col,
         available_width,
+        available_height,
         font_resolver,
         streaming_chunk_rows=max(segment_rows, streaming_chunk_rows),
         page_breaks=_resolved_row_page_breaks(sheet),
@@ -1353,6 +1382,7 @@ def _sheet_flowables(
     raw_sheet: dict[str, Any],
     *,
     available_width: float,
+    available_height: float | None = None,
     column_width_mode: str | None,
     row_height_mode: str | None,
     default_column_width: float | None,
@@ -1366,6 +1396,7 @@ def _sheet_flowables(
             bundle,
             raw_sheet,
             available_width=available_width,
+            available_height=available_height,
             column_width_mode=column_width_mode,
             row_height_mode=row_height_mode,
             default_column_width=default_column_width,
@@ -1380,6 +1411,7 @@ def _sheet_flowables(
             bundle,
             raw_sheet,
             available_width=available_width,
+            available_height=available_height,
             column_width_mode=column_width_mode,
             row_height_mode=row_height_mode,
             default_column_width=default_column_width,
@@ -1393,6 +1425,7 @@ def _sheet_flowables(
         bundle,
         raw_sheet,
         available_width=available_width,
+        available_height=available_height,
         column_width_mode=column_width_mode,
         row_height_mode=row_height_mode,
         default_column_width=default_column_width,
@@ -1938,6 +1971,7 @@ def export_report_bundle(
     font_resolver = _FontResolver(fonts)
     _ensure_output_parent(output_path)
     available_width = pagesize[0] - (margin * 2)
+    available_height = pagesize[1] - (margin * 2)
     fast_grid_plans = _fast_grid_plans(
         bundle,
         available_width=available_width,
@@ -1975,6 +2009,7 @@ def export_report_bundle(
                 bundle,
                 raw_sheet,
                 available_width=available_width,
+                available_height=available_height,
                 column_width_mode=column_width_mode,
                 row_height_mode=row_height_mode,
                 default_column_width=default_column_width,
