@@ -1177,6 +1177,7 @@ def _chunked_row_flowables(
             available_height is not None
             and chunk
             and chunk_height + row_height > available_height
+            and _chunk_merges_fit(chunk)
         ):
             yield _emit_chunk(
                 prepend_dataframe_headers=prepend_dataframe_headers_on_next_chunk
