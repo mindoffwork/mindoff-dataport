@@ -2452,6 +2452,41 @@ def test_pdf_table_style_does_not_draw_default_grid_for_empty_cells():
     )
 
 
+def test_pdf_height_flush_preserves_multi_row_merge_span():
+    # A multi-row merged cell (e.g. the "Signature" area spanning 2 rows) must not
+    # lose its SPAN command when a page-height overflow would otherwise flush the
+    # chunk after only the anchor row has been accumulated.
+    sheet = _schema({"A1": _cell("A1", "x")}, dims="A1:B2")["sheets"][0]
+    anchor = _cell("A1", "Signature")
+    anchor["merged"] = True
+    anchor["merge_anchor"] = "A1"
+    row1 = {
+        "cells": {1: anchor},
+        "merges": [{"min_row_offset": 0, "max_row_offset": 1, "min_col": 1, "max_col": 2}],
+        "row_idx": 1,
+    }
+    row2 = {"cells": {1: _cell("A2", None)}, "merges": [], "row_idx": 2}
+
+    # available_height is just enough for one row, which would normally flush the
+    # chunk after row1 before row2 is appended — dropping the 2-row merge.
+    tiny_height = 15.0
+    flowables = list(
+        _chunked_row_flowables(
+            sheet,
+            iter([row1, row2]),
+            1,
+            2,
+            500,
+            tiny_height,
+            _FontResolver(),
+            streaming_chunk_rows=100,
+        )
+    )
+    tables = [f for f in flowables if hasattr(f, "_spanCmds")]
+    # The SPAN (0,0)-(1,1) must appear in exactly one chunk table.
+    assert any(("SPAN", (0, 0), (1, 1)) in t._spanCmds for t in tables)
+
+
 def test_pdf_table_style_uses_registered_custom_font():
     cell = _cell("A1", "Custom Font")
     cell["font"] = dict(cell["font"])
