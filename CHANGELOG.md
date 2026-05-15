@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v0.6.1
 
 ### Fixes
 - 🐛 Fix PDF height-flush dropping multi-row merges at chunk boundaries ([#16](https://github.com/mindoffwork/mindoff-dataport/pull/16))
