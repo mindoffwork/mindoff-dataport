@@ -115,6 +115,6 @@ Compilation is the expensive part: reading the template contract, validating typ
 - **`KeyError` on a required placeholder.**
   The payload is missing a key the template needs. Compare against `inputs(schema)`.
 - **`ValueError` about merges overlapping dataframe output.**
-  A merged region sits where a table wants to expand. Either move it in the template or let the library move it with `dataframe_shift`; see [Dataframe Layout & Shifting](dataframe-layout.md#dataframe-collision-shifting).
+  A merged region sits where a table wants to expand. Either move it in the template or let the library move it with `dataframe_shift`; see [Dataframe Layout & Shifting](dataframe-layout.md#2-dataframe-collision-shifting).
 - **The bundle directory wasn't deleted.**
   `auto_delete_bundle` only deletes after a *successful* export. A failed export keeps the bundle so you don't lose work.

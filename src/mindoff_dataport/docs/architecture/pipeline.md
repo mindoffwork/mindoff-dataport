@@ -2,7 +2,7 @@
 
 `mindoff-dataport` is built around a single, linear pipeline. Data flows one way: from a template file, through an in-memory schema, into a portable bundle, and out to a rendered file. Each stage has one job and one output.
 
-For a user-facing walkthrough of these steps, see the [Quick Start](/#quick-start).
+For a user-facing walkthrough of these steps, see the [Quick Start](../index.md#quick-start).
 
 ## Data Flow
 

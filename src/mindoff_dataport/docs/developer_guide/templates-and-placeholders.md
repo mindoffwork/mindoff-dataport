@@ -64,11 +64,11 @@ A repeat block is a section of your template that gets rendered once per record 
 | `repeat-start` | Marks the first row of the repeating block (a control row, not rendered) |
 | `repeat-end`   | Marks the last row of the repeating block (a control row, not rendered)  |
 
-The control rows themselves never appear in the output; they only bracket the region. Everything between them repeats. See the [Repeat Sections recipe](recipes.md#repeat-sections-per-customer-blocks) for a full example and the rules that apply.
+The control rows themselves never appear in the output; they only bracket the region. Everything between them repeats. See the [Repeat Sections recipe](recipes.md#2-repeat-sections-per-customer-blocks) for a full example and the rules that apply.
 
 ### 4. Dynamic Sheets
 
-Sometimes you don't want a repeating block; you want a whole **sheet** per group (one tab per region, per customer, per month). Name the template sheet exactly `{{key}}` and it becomes a stencil: pass a dict of `output_sheet_name -> payload` and the library produces one sheet per entry, in insertion order. Details and payload shape live in [The Data Contract](data-contract.md#dynamic-sheet-group).
+Sometimes you don't want a repeating block; you want a whole **sheet** per group (one tab per region, per customer, per month). Name the template sheet exactly `{{key}}` and it becomes a stencil: pass a dict of `output_sheet_name -> payload` and the library produces one sheet per entry, in insertion order. Details and payload shape live in [The Data Contract](data-contract.md#3-dynamic-sheet-group).
 
 ### 5. Manual Page Breaks
 
@@ -77,7 +77,7 @@ Templates can also carry Excel's own manual print breaks, the ones you set with 
 - `row_page_breaks`: 1-based template rows after which a new printed page begins.
 - `column_page_breaks`: 1-based template columns after which a new printed page begins.
 
-During `compile()` these breaks are re-resolved against the final layout (after tables expand and content shifts). XLSX preserves both row and column breaks; PDF honors row breaks as hard page boundaries and ignores column breaks. The full behavior is covered in [Dataframe Layout & Shifting](dataframe-layout.md#manual-page-breaks).
+During `compile()` these breaks are re-resolved against the final layout (after tables expand and content shifts). XLSX preserves both row and column breaks; PDF honors row breaks as hard page boundaries and ignores column breaks. The full behavior is covered in [Dataframe Layout & Shifting](dataframe-layout.md#3-manual-page-breaks).
 
 ## Core Concepts
 

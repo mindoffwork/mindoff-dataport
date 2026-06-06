@@ -107,7 +107,7 @@ Font rules:
 
 ### 4. Understand What Renders
 
-PDF reproduces the great majority of Excel styling: fonts, fills (solid), alignment (including `justify`/`distributed`), borders (drawn around full merged regions), strikethrough, superscript/subscript, and indents. A couple of things are captured in the schema but **not** drawn in PDF: `text_rotation` and diagonal borders. The complete matrix is in [Sizing & Styling](sizing-and-styling.md#supported-styling).
+PDF reproduces the great majority of Excel styling: fonts, fills (solid), alignment (including `justify`/`distributed`), borders (drawn around full merged regions), strikethrough, superscript/subscript, and indents. A couple of things are captured in the schema but **not** drawn in PDF: `text_rotation` and diagonal borders. The complete matrix is in [Sizing & Styling](sizing-and-styling.md#2-supported-styling).
 
 ## Core Concepts
 

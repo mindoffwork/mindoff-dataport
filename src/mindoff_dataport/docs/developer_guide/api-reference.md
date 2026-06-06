@@ -55,4 +55,4 @@ from mindoff_dataport import repeat_records
 records = repeat_records(scalar_records, constants={"line_items": shared_df})
 ```
 
-See the [Repeat Sections recipe](recipes.md#repeat-sections-per-customer-blocks) for context on when to reach for it.
+See the [Repeat Sections recipe](recipes.md#2-repeat-sections-per-customer-blocks) for context on when to reach for it.

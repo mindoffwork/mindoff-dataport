@@ -45,7 +45,7 @@ If that runs without an `ImportError`, you're ready.
 
 ## The Four-Step Workflow
 
-Every report follows the same sequence: **extract** the template, **inspect** what it needs, **compile** your data into it, and **export** to a file. The [Quick Start](/#quick-start) walks through all four steps with a full code example. Once you've run your first report, continue with [Templates & Placeholders](templates-and-placeholders.md) to mark up your own Excel files.
+Every report follows the same sequence: **extract** the template, **inspect** what it needs, **compile** your data into it, and **export** to a file. The [Quick Start](../index.md#quick-start) walks through all four steps with a full code example. Once you've run your first report, continue with [Templates & Placeholders](templates-and-placeholders.md) to mark up your own Excel files.
 
 ## Installing from Source
 

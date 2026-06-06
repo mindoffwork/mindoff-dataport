@@ -39,7 +39,7 @@ When a sheet contains a repeat block (`{{key:repeat-start}}` ... `{{key:repeat-e
 }
 ```
 
-The blocks render top to bottom in list order. For the layout rules (sibling sections, static rows, merged-cell limits), see the [Repeat Sections recipe](recipes.md#repeat-sections-per-customer-blocks).
+The blocks render top to bottom in list order. For the layout rules (sibling sections, static rows, merged-cell limits), see the [Repeat Sections recipe](recipes.md#2-repeat-sections-per-customer-blocks).
 
 ### 3. Dynamic Sheet Group
 
