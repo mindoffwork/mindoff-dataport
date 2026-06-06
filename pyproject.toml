@@ -57,9 +57,16 @@ dev = [
   "pytest-cov>=5.0,<7.0",
   "polars>=1.0,<2.0",
 ]
+docs = [
+  "mkdocs>=1.6,<2.0",
+  "mkdocs-material>=9.5,<10.0",
+  "mike>=2.0,<3.0",
+  "pymdown-extensions>=10.0,<11.0",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/mindoffwork/mindoff-dataport"
+"Documentation" = "https://dataport.mindoff.work/"
 "Source" = "https://github.com/mindoffwork/mindoff-dataport.git"
 "Issues" = "https://github.com/mindoffwork/mindoff-dataport/issues"
 "Changelog" = "https://github.com/mindoffwork/mindoff-dataport/blob/root/CHANGELOG.md"
