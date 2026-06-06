@@ -1,5 +1,10 @@
 <h1>Release Notes</h1>
 
+## Recent Changes
+
+### Documentation
+- 📝 Add contributing guide and MkDocs documentation setup ([#17](https://github.com/mindoffwork/mindoff-dataport/pull/17))
+
 ## v0.6.1
 
 ### Fixes
