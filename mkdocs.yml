@@ -1,0 +1,105 @@
+site_name: Mindoff Dataport
+site_description: High-fidelity Excel and PDF reports from reusable .xlsx templates
+site_url: https://dataport.mindoff.work
+repo_name: mindoffwork/mindoff-dataport
+repo_url: https://github.com/mindoffwork/mindoff-dataport
+docs_dir: src/mindoff_dataport/docs
+
+nav:
+  - Getting Started:
+      - Introduction: index.md
+      - Release Notes: release_notes.md
+  - Developer Guide:
+      - Overview: developer_guide/index.md
+      - Installation: developer_guide/installation.md
+      - Templates & Placeholders: developer_guide/templates-and-placeholders.md
+      - The Data Contract: developer_guide/data-contract.md
+      - Compiling Report Bundles: developer_guide/compiling-bundles.md
+      - Exporting to Excel: developer_guide/exporting-xlsx.md
+      - Exporting to PDF: developer_guide/exporting-pdf.md
+      - Dataframe Layout & Shifting: developer_guide/dataframe-layout.md
+      - Sizing & Styling: developer_guide/sizing-and-styling.md
+      - API Reference: developer_guide/api-reference.md
+      - Recipes: developer_guide/recipes.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - The Pipeline: architecture/pipeline.md
+      - Template Extraction: architecture/extraction.md
+      - Compilation & Bundle: architecture/compilation.md
+      - XLSX Rendering: architecture/xlsx-rendering.md
+      - PDF Rendering: architecture/pdf-rendering.md
+      - Benchmarking: architecture/benchmarking.md
+  - Community:
+      - Overview: community/index.md
+      - Contribution Guide: community/contribution-guide.md
+      - Deployment & Versioning: community/deployment-versioning.md
+      - Security Policy: community/security-policy.md
+
+theme:
+  name: material
+  logo: _assets/mindoff_dataport_logo.svg
+  favicon: _assets/mindoff-logo-icon-with-bg.png
+  font:
+    text: Ubuntu
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - scheme: default
+      primary: black
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      check_paths: true
+      base_path:
+        - .
+        - src/mindoff_dataport/docs
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+# Keep build hooks out of the published site (they still load via `hooks:` below).
+exclude_docs: |
+  _hooks/
+
+hooks:
+  - src/mindoff_dataport/docs/_hooks/main.py
+
+extra_css:
+  - _assets/stylesheets/style.css
+
+extra:
+  generator: false
+  version:
+    provider: mike
+    default: latest-release
+copyright: '©️ 2026 <a href="https://www.mindoff.work">Mindoff.work</a>'

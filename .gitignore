@@ -19,6 +19,10 @@ ENV/
 htmlcov/
 temp_pytest_workspace/
 
+# Documentation build output (MkDocs / mike)
+site/
+.cache/
+
 # Packaging / build artifacts
 build/
 dist/
@@ -50,6 +54,7 @@ Thumbs.db
 CLAUDE.md
 claude.md
 AGENTS.md
+DOCS_RULES.md
 rewrite_author.sh
 
 # Generated example outputs
