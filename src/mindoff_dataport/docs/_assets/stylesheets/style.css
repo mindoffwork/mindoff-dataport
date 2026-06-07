@@ -618,12 +618,17 @@ html .md-footer-meta.md-typeset .md-copyright__highlight a {
 		padding: 0.8rem;
 	}
 
+	.md-header__inner > .md-header__option {
+		order: 2;
+		margin: 0 0.3rem 0 0;
+	}
+
 	.md-nav--primary .md-nav__title[for="__drawer"],
 	html
 		[data-md-color-primary="black"]
 		.md-nav--primary
 		.md-nav__title[for="__drawer"] {
-		background-color: var(--mo-light);
+		background-color: var(--mo-green);
 		color: var(--mo-ink);
 		font-weight: 900;
 		border-bottom: 2px solid var(--md-default-fg-color--lightest);
@@ -693,11 +698,6 @@ html .md-footer-meta.md-typeset .md-copyright__highlight a {
 }
 [data-md-color-scheme="slate"][data-md-color-primary="black"] .md-tabs {
 	background-color: var(--md-default-bg-color);
-}
-
-/* Logo box uses the deep green in dark mode */
-[data-md-color-scheme="slate"] .md-header__button.md-logo {
-	background-color: #033a27;
 }
 
 /* Tabs links */
