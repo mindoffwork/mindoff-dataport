@@ -11,7 +11,7 @@
 
 :root {
 	--mo-white: #ffffff;
-	--mo-light: #feeec2; /* main light */
+	--mo-light: #fffaed; /* main light */
 	--mo-ink: #000000; /* main ink */
 	--mo-dark: #043a26; /* main dark green */
 	--mo-green: #71c961; /* main green */
@@ -51,7 +51,7 @@
 }
 
 [data-md-color-scheme="default"][data-md-color-primary="black"] .md-header {
-	background-color: #feeec280;
+	background-color: #fffaed80;
 	-webkit-backdrop-filter: blur(12px);
 	backdrop-filter: blur(12px);
 }
@@ -589,7 +589,7 @@ html .md-footer-meta.md-typeset .md-copyright__highlight a {
 	border-radius: 16px;
 	box-shadow: var(--md-shadow-z2);
 	color: rgba(0, 0, 0, 0.5);
-	background-color: #feeec280;
+	background-color: #fffaed80;
 	-webkit-backdrop-filter: blur(12px);
 	backdrop-filter: blur(12px);
 	border: 2px solid rgba(0, 0, 0, 0.05);
