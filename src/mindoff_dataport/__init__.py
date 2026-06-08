@@ -160,7 +160,7 @@ def compile_report_bundle(
 def export_report_bundle(
     bundle_or_path: ReportBundle | str,
     output_path: str,
-    format: Literal["xlsx", "pdf", "image"] = "xlsx",
+    format: Literal["xlsx", "pdf"] = "xlsx",
     **options: Any,
 ) -> None | list[str]:
     """
@@ -183,7 +183,7 @@ def export_report_bundle(
     |------------------|-----------------------|----------|----------|-------------|
     | `bundle_or_path` | `ReportBundle | str` | Yes      | —        | In-memory bundle or path to a bundle directory |
     | `output_path`    | `str`                 | Yes      | —        | Destination file path (`.xlsx` or `.pdf`) |
-    | `format`         | `str`                 | No       | `"xlsx"` | `"xlsx"` or `"pdf"`. `"image"` is reserved and raises `NotImplementedError` |
+    | `format`         | `str`                 | No       | `"xlsx"` | `"xlsx"` or `"pdf"` |
     | `**options`      | —                     | No       | —        | Sizing and format-specific options (see the Exporting guides) |
 
     **Returns:** `None` for fidelity XLSX and all PDF exports. For streaming

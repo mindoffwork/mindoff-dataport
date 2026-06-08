@@ -5,6 +5,9 @@
 ### Documentation
 - 📝 Add contributing guide and MkDocs documentation setup ([#17](https://github.com/mindoffwork/mindoff-dataport/pull/17))
 
+### Internal
+- 🔒 Tighten stable export contract before release ([#18](https://github.com/mindoffwork/mindoff-dataport/pull/18))
+
 ## v0.6.1
 
 ### Fixes
