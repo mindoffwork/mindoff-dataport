@@ -2212,13 +2212,9 @@ def export_report_bundle(
     **options: Any,
 ) -> None | list[str]:
     """Render a ReportBundle to the requested output format."""
-    if format == "image":
-        raise NotImplementedError(
-            "ReportBundle export format 'image' is reserved but not implemented in v1."
-        )
     if format not in {"xlsx", "pdf"}:
         raise ValueError(
-            f"Unsupported report export format '{format}'. Expected 'xlsx', 'pdf', or 'image'."
+            f"Unsupported report export format '{format}'. Expected 'xlsx' or 'pdf'."
         )
 
     bundle = _coerce_bundle(bundle_or_path)
