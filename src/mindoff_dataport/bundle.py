@@ -1644,7 +1644,7 @@ def compile_report_bundle(
         },
         "dataframe_sources": data_sources,
         "assets": [],
-        "output_capabilities": {"xlsx": True, "pdf": True, "image": False},
+        "output_capabilities": {"xlsx": True, "pdf": True},
     }
     if template.get("theme_colors"):
         manifest["theme_colors"] = template["theme_colors"]

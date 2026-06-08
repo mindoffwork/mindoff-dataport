@@ -239,7 +239,6 @@ def test_compile_creates_valid_report_bundle_directory(managed_tmp_dir: Path):
     assert manifest["output_capabilities"] == {
         "xlsx": True,
         "pdf": True,
-        "image": False,
     }
     assert report["sheets"][0]["dataframe_anchors"][0]["columns"] == ["A", "B"]
 
@@ -1655,11 +1654,14 @@ def test_export_pdf_creates_nonempty_pdf(managed_tmp_dir: Path):
     assert out.read_bytes().startswith(b"%PDF")
 
 
-def test_export_image_is_reserved(managed_tmp_dir: Path):
+def test_export_rejects_unsupported_format(managed_tmp_dir: Path):
     schema = _schema({"A1": _cell("A1", "{{name:string}}")}, dims="A1:A1")
     bundle = mo_dataport.compile(schema, {"Sheet1": {"name": "Alice"}})
 
-    with pytest.raises(NotImplementedError, match="image"):
+    with pytest.raises(
+        ValueError,
+        match="Unsupported report export format 'image'. Expected 'xlsx' or 'pdf'.",
+    ):
         mo_dataport.export(bundle, str(managed_tmp_dir / "out.png"), format="image")
 
 
