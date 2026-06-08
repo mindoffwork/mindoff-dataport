@@ -2,6 +2,8 @@
 
 _Build high-fidelity Excel and PDF reports from reusable `.xlsx` templates._
 
+![Mindoff Dataport cover image](https://raw.githubusercontent.com/mindoffwork/mindoff.work/refs/heads/root/public/images/projects/mindoff_dataport/mindoff-dataport-cover-with-name.png)
+
 Mindoff Dataport turns styled Excel workbooks into reusable report templates, compiles runtime data into a portable `ReportBundle`, and exports `.xlsx` and `.pdf` outputs while preserving the layout, structure, and styling you designed.
 
 [![Coverage Status](https://codecov.io/gh/mindoffwork/mindoff-dataport/branch/root/graph/badge.svg)](https://codecov.io/gh/mindoffwork/mindoff-dataport)
