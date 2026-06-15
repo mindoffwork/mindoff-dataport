@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Documentation
+- 📝 Refresh roadmap docs and add code of conduct ([#20](https://github.com/mindoffwork/mindoff-dataport/pull/20))
 - 📝 Add roadmap and improve project documentation ([#19](https://github.com/mindoffwork/mindoff-dataport/pull/19))
 
 ## v1.0.0
