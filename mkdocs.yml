@@ -8,6 +8,7 @@ docs_dir: src/mindoff_dataport/docs
 nav:
   - Getting Started:
       - Introduction: index.md
+      - Roadmap: roadmap.md
       - Release Notes: release_notes.md
   - Developer Guide:
       - Overview: developer_guide/index.md

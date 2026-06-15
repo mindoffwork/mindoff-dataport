@@ -14,6 +14,8 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 
 **Source**: [https://github.com/mindoffwork/mindoff-dataport](https://github.com/mindoffwork/mindoff-dataport)
 
+**Roadmap**: [ROADMAP.md](ROADMAP.md) | [Docs page](https://dataport.mindoff.work/latest-release/roadmap/)
+
 ## Key Features
 
 1. **Template-First Report Generation**   
@@ -34,30 +36,22 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 6. **Adjustable Layout at Export Time**   
    Column occupation, alignment, and collision shifting are configurable at runtime, without touching the original template.
 
-## Performance
+## Why Not Just openpyxl, ReportLab, or XlsxWriter?
 
-Streaming mode holds near-constant peak memory regardless of dataset size. These benchmarks compare it against raw openpyxl, xlsxwriter, and ReportLab loops with equivalent layout and styling (the most direct alternative).
+Those tools still matter here. `mindoff-dataport` builds on them instead of pretending they do not exist. The difference is where the work lives.
 
-![XLSX export: export time and peak memory at scale](https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_xlsx.png)
-
-**Fig. 1: XLSX export.** Left: wall-clock time for all Mindoff modes; both streaming and fidelity scale O(n) linearly. Right: peak RSS; Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size.
-
-![PDF export: export time and peak memory at scale](https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_pdf.png)
-
-**Fig. 2: PDF export.** Left: wall-clock time; linear O(n) scaling. Right: peak RSS; Mindoff streaming vs. ReportLab raw loop.
-
-| Scenario | Mode | Why |
+| If you build with... | You usually own... | What `mindoff-dataport` changes |
 |---|---|---|
-| ≤ 50K rows, full style fidelity | `export_mode="fidelity"` | Full merged-cell and style support; no streaming constraints |
-| > 50K rows, XLSX | `export_mode="streaming"` | Near-constant memory regardless of row count |
-| Any size, PDF | automatic | PDF always paginates; no `export_mode` setting needed |
-| > 1M rows, split output | `streaming` + `max_rows_per_workbook` | Splits output across multiple workbook files |
+| `openpyxl` | Cell-by-cell layout code, style copying, merge handling, row/column shifting, and workbook assembly | You keep the layout in Excel and compile data into a reusable bundle before export |
+| `reportlab` | A second PDF-specific layout system, plus duplicated styling decisions that drift from Excel over time | The same compiled bundle exports to PDF, so the PDF path follows the template-driven plan instead of a separate document build |
+| `xlsxwriter` | Fast XLSX writing, but still your responsibility to recreate template structure and styling rules in code | Streaming export keeps the write path efficient while the template and compile steps carry the layout contract |
+| `mindoff-dataport` | An extra extract-and-compile step, plus some streaming constraints for very large exports | In return, you get one template-driven workflow for `.xlsx` and `.pdf`, with less layout logic living in application code |
 
-Full methodology, fairness notes, and instructions to reproduce the numbers yourself are in the [Benchmarking guide](https://dataport.mindoff.work/latest-release/architecture/benchmarking/).
+If your report is simple enough that raw workbook or PDF code stays readable, the lower-level libraries may be enough. This project is for the point where template fidelity, repeated exports, and layout drift start costing more than an extra compile step.
 
 ## Quick Start
 
-Think of it like a mail merge for spreadsheets: you design the layout once in Excel, then the library fills in the data. Every report follows four steps: **extract → inspect → compile → export**.
+Think of it like a mail merge for spreadsheets: you design the layout once in Excel, then the library fills in the data. Every report follows four steps: **extract -> inspect -> compile -> export**.
 
 ### 1. Install the Package
 
@@ -122,6 +116,29 @@ mo_dataport.export(bundle, "invoice_filled.pdf", format="pdf")
 ```
 
 When you're ready to go further (placeholders, the data contract, streaming, repeats, dynamic sheets, custom fonts, and the full API reference), head to the [developer guide](https://dataport.mindoff.work/latest-release/developer_guide/).
+
+If you want to see what is already covered and what is planned next, check the [roadmap](ROADMAP.md).
+
+## Performance
+
+Streaming mode holds near-constant peak memory regardless of dataset size. These benchmarks compare it against raw openpyxl, xlsxwriter, and ReportLab loops with equivalent layout and styling (the most direct alternative).
+
+![XLSX export: export time and peak memory at scale](https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_xlsx.png)
+
+**Fig. 1: XLSX export.** Left: wall-clock time for all Mindoff modes; both streaming and fidelity scale O(n) linearly. Right: peak RSS; Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size.
+
+![PDF export: export time and peak memory at scale](https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_pdf.png)
+
+**Fig. 2: PDF export.** Left: wall-clock time; linear O(n) scaling. Right: peak RSS; Mindoff streaming vs. ReportLab raw loop.
+
+| Scenario | Mode | Why |
+|---|---|---|
+| <= 50K rows, full style fidelity | `export_mode="fidelity"` | Full merged-cell and style support; no streaming constraints |
+| > 50K rows, XLSX | `export_mode="streaming"` | Near-constant memory regardless of row count |
+| Any size, PDF | automatic | PDF always paginates; no `export_mode` setting needed |
+| > 1M rows, split output | `streaming` + `max_rows_per_workbook` | Splits output across multiple workbook files |
+
+Full methodology, fairness notes, and instructions to reproduce the numbers yourself are in the [Benchmarking guide](https://dataport.mindoff.work/latest-release/architecture/benchmarking/).
 
 ## License
 

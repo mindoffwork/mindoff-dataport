@@ -81,14 +81,14 @@ mo_dataport.export(bundle, "report.xlsx", auto_delete_bundle=True)
 import json
 from mindoff_dataport import mo_dataport
 
-# Once — at deploy time or when the template file changes
+# Once: at deploy time or when the template file changes
 schema = mo_dataport.extract("invoice_template.xlsx")
 with open("invoice_schema.json", "w", encoding="utf-8") as f:
     json.dump(schema, f)
 ```
 
 ```python
-# Every report run — no .xlsx read
+# Every report run: no .xlsx read
 import json
 from mindoff_dataport import mo_dataport
 

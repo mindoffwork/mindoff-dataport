@@ -72,7 +72,7 @@ Sometimes you don't want a repeating block; you want a whole **sheet** per group
 
 ### 5. Manual Page Breaks
 
-Templates can also carry Excel's own manual print breaks, the ones you set with **Page Layout → Breaks**. These are not placeholder syntax; they're real Excel metadata, and the library reads them too.
+Templates can also carry Excel's own manual print breaks, the ones you set with **Page Layout -> Breaks**. These are not placeholder syntax; they're real Excel metadata, and the library reads them too.
 
 - `row_page_breaks`: 1-based template rows after which a new printed page begins.
 - `column_page_breaks`: 1-based template columns after which a new printed page begins.
@@ -83,7 +83,7 @@ During `compile()` these breaks are re-resolved against the final layout (after 
 
 ### 1. How the Library Discovers Placeholders
 
-Extraction reads every cell's value looking for `{{key:type}}` markers. The resulting schema is a static snapshot of the template at that moment. If you edit the template file afterward — adding a placeholder, renaming a key, changing a type — re-run `extract()` before compiling; the schema won't update itself. An unrecognized type string (for example `{{x:strring}}`) is treated as plain text and won't appear in `inputs()`.
+Extraction reads every cell's value looking for `{{key:type}}` markers. The resulting schema is a static snapshot of the template at that moment. If you edit the template file afterward (adding a placeholder, renaming a key, changing a type), re-run `extract()` before compiling; the schema won't update itself. An unrecognized type string (for example `{{x:strring}}`) is treated as plain text and won't appear in `inputs()`.
 
 ### 2. Key, Type, and Column Name
 

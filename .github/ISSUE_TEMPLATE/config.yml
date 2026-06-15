@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussions
+    url: https://github.com/mindoffwork/mindoff-dataport/discussions
+    about: Use GitHub Discussions for questions, ideas, and general conversation.
+  - name: Read the README
+    url: https://github.com/mindoffwork/mindoff-dataport#readme
+    about: Check the project overview, quick start, and docs links before opening an issue.
