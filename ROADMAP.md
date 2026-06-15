@@ -1,6 +1,6 @@
 # Roadmap
 
-This file tracks where `mindoff-dataport` stands today and what is likely to come next.
+Tracks where `mindoff-dataport` stands today and what is likely to come next.
 
 It is not a release promise. It is the clearest current picture of direction.
 

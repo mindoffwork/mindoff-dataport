@@ -8,7 +8,6 @@ docs_dir: src/mindoff_dataport/docs
 nav:
   - Getting Started:
       - Introduction: index.md
-      - Roadmap: roadmap.md
       - Release Notes: release_notes.md
   - Developer Guide:
       - Overview: developer_guide/index.md
@@ -32,6 +31,7 @@ nav:
       - Benchmarking: architecture/benchmarking.md
   - Community:
       - Overview: community/index.md
+      - Roadmap: community/roadmap.md
       - Contribution Guide: community/contribution-guide.md
       - Deployment & Versioning: community/deployment-versioning.md
       - Security Policy: community/security-policy.md
@@ -80,6 +80,9 @@ markdown_extensions:
       base_path:
         - .
         - src/mindoff_dataport/docs
+  - pymdownx.tasklist:
+      custom_checkbox: true
+      clickable_checkbox: false
   - pymdownx.tabbed:
       alternate_style: true
   - toc:

@@ -14,7 +14,7 @@ Mindoff Dataport turns styled Excel workbooks into reusable report templates, co
 
 **Source**: [https://github.com/mindoffwork/mindoff-dataport](https://github.com/mindoffwork/mindoff-dataport)
 
-**Roadmap**: [ROADMAP.md](ROADMAP.md) | [Docs page](https://dataport.mindoff.work/latest-release/roadmap/)
+**Roadmap**: [https://dataport.mindoff.work/latest-release/community/roadmap/](https://dataport.mindoff.work/latest-release/community/roadmap/)
 
 **Case Study**: [https://mindoff.work/projects/mindoff-dataport/](https://mindoff.work/projects/mindoff-dataport/)
 
