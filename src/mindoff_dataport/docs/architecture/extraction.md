@@ -51,10 +51,11 @@ A border drawn around a merged block in Excel belongs to the whole region, not j
 - It is **complete**: a renderer can reproduce the template from the schema alone.
 - It is **inert**: extraction never writes back to the source file, and compilation never mutates the schema.
 
-Because `WorkbookSchema` is a plain Python dict, it serializes directly with `json.dump` / `json.load`. In production, extract once when the template changes, persist the result, and load from JSON on every subsequent compile — skipping the openpyxl `.xlsx` read entirely. See [Compiling Report Bundles: Cache the Extracted Schema in Production](../developer_guide/compiling-bundles.md#5-cache-the-extracted-schema-in-production) for the full pattern.
+Because `WorkbookSchema` is a plain Python dict, it serializes directly with `json.dump` / `json.load`. In production, extract once when the template changes, persist the result, and load from JSON on every subsequent compile. This skips the openpyxl `.xlsx` read entirely. See [Compiling Report Bundles: Cache the Extracted Schema in Production](../developer_guide/compiling-bundles.md#5-cache-the-extracted-schema-in-production) for the full pattern.
 
 ## Troubleshooting Extraction
 
 1. **A placeholder wasn't discovered.** Verify the exact `{{key:type}}` syntax and a supported type; malformed markers are treated as plain text.
 2. **A color looks wrong downstream.** Confirm whether it's a theme color; symbolic theme values are resolved per-renderer, and non-OpenPyXL renderers rely on the captured `theme_colors` map.
 3. **A ranged column width didn't apply.** Ranged widths are expanded per column at extraction; if a width is missing, check that the template actually set it on that column.
+

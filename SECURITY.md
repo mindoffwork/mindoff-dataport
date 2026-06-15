@@ -1,7 +1,7 @@
 <h1>Mindoff Dataport Security Policy</h1>
 
 Reports often carry sensitive business data, so security matters here.
-Responsible disclosure of any vulnerability is truly appreciated 👏.
+Responsible disclosure of any vulnerability is truly appreciated.
 
 Only the latest version of the `mindoff-dataport` package is actively supported, so it helps if you can confirm the issue on the newest version first.
 
@@ -16,8 +16,8 @@ Include whatever you have, ideally:
 - Expected impact
 - Environment or dependency details
 
-Please do **not** open a public issue or discussion while we're investigating — it's better for the community to work toward a fix privately first.
+Please do **not** open a public issue or discussion while we're investigating. It's better for the community to work toward a fix privately first.
 
 If it's a confirmed vulnerability, you'll get credit in the docs unless you'd prefer to stay low-key.
 
-🙏 Thanks for helping keep `mindoff-dataport` safe.
+Thanks for helping keep `mindoff-dataport` safe.
