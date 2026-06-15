@@ -1359,6 +1359,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../community/roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../community/contribution-guide/" class="md-nav__link">
         
   
@@ -1736,7 +1764,7 @@
 <h3 id="4-dynamic-sheets">4. Dynamic Sheets<a class="headerlink" href="#4-dynamic-sheets" title="Permanent link">&para;</a></h3>
 <p>Sometimes you don't want a repeating block; you want a whole <strong>sheet</strong> per group (one tab per region, per customer, per month). Name the template sheet exactly <code>{{key}}</code> and it becomes a stencil: pass a dict of <code>output_sheet_name -&gt; payload</code> and the library produces one sheet per entry, in insertion order. Details and payload shape live in <a href="../data-contract/#3-dynamic-sheet-group">The Data Contract</a>.</p>
 <h3 id="5-manual-page-breaks">5. Manual Page Breaks<a class="headerlink" href="#5-manual-page-breaks" title="Permanent link">&para;</a></h3>
-<p>Templates can also carry Excel's own manual print breaks, the ones you set with <strong>Page Layout → Breaks</strong>. These are not placeholder syntax; they're real Excel metadata, and the library reads them too.</p>
+<p>Templates can also carry Excel's own manual print breaks, the ones you set with <strong>Page Layout -&gt; Breaks</strong>. These are not placeholder syntax; they're real Excel metadata, and the library reads them too.</p>
 <ul>
 <li><code>row_page_breaks</code>: 1-based template rows after which a new printed page begins.</li>
 <li><code>column_page_breaks</code>: 1-based template columns after which a new printed page begins.</li>
@@ -1744,7 +1772,7 @@
 <p>During <code>compile()</code> these breaks are re-resolved against the final layout (after tables expand and content shifts). XLSX preserves both row and column breaks; PDF honors row breaks as hard page boundaries and ignores column breaks. The full behavior is covered in <a href="../dataframe-layout/#3-manual-page-breaks">Dataframe Layout &amp; Shifting</a>.</p>
 <h2 id="core-concepts">Core Concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
 <h3 id="1-how-the-library-discovers-placeholders">1. How the Library Discovers Placeholders<a class="headerlink" href="#1-how-the-library-discovers-placeholders" title="Permanent link">&para;</a></h3>
-<p>Extraction reads every cell's value looking for <code>{{key:type}}</code> markers. The resulting schema is a static snapshot of the template at that moment. If you edit the template file afterward — adding a placeholder, renaming a key, changing a type — re-run <code>extract()</code> before compiling; the schema won't update itself. An unrecognized type string (for example <code>{{x:strring}}</code>) is treated as plain text and won't appear in <code>inputs()</code>.</p>
+<p>Extraction reads every cell's value looking for <code>{{key:type}}</code> markers. The resulting schema is a static snapshot of the template at that moment. If you edit the template file afterward (adding a placeholder, renaming a key, changing a type), re-run <code>extract()</code> before compiling; the schema won't update itself. An unrecognized type string (for example <code>{{x:strring}}</code>) is treated as plain text and won't appear in <code>inputs()</code>.</p>
 <h3 id="2-key-type-and-column-name">2. Key, Type, and Column Name<a class="headerlink" href="#2-key-type-and-column-name" title="Permanent link">&para;</a></h3>
 <p>These three things are distinct and easy to conflate. The <code>key</code> is the name you use in your payload dict. The <code>type</code> constrains what value the library accepts and validates at compile time. For dataframe placeholders, the <code>key</code> identifies which dataframe to use; the column <strong>names</strong> of that <code>DataFrame</code> or <code>LazyFrame</code> become the header text written to the output. Renaming a dataframe column changes the header in the report, not the payload key.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>

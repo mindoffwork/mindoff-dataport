@@ -479,10 +479,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance" class="md-nav__link">
+  <a href="#why-not-just-openpyxl-reportlab-or-xlsxwriter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance
+        Why Not Just openpyxl, ReportLab, or XlsxWriter?
       
     </span>
   </a>
@@ -558,6 +558,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1325,6 +1336,34 @@
   
   
     <li class="md-nav__item">
+      <a href="community/roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="community/contribution-guide/" class="md-nav__link">
         
   
@@ -1445,10 +1484,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance" class="md-nav__link">
+  <a href="#why-not-just-openpyxl-reportlab-or-xlsxwriter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance
+        Why Not Just openpyxl, ReportLab, or XlsxWriter?
       
     </span>
   </a>
@@ -1528,6 +1567,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#license" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1568,6 +1618,8 @@
 <a href="https://github.com/mindoffwork/mindoff-dataport/actions/workflows/root_ci.yml"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&amp;logoColor=white" /></a></p>
 <p><strong>Documentation</strong>: <a href="https://dataport.mindoff.work">https://dataport.mindoff.work</a></p>
 <p><strong>Source</strong>: <a href="https://github.com/mindoffwork/mindoff-dataport">https://github.com/mindoffwork/mindoff-dataport</a></p>
+<p><strong>Roadmap</strong>: <a href="https://dataport.mindoff.work/latest-release/community/roadmap/">https://dataport.mindoff.work/latest-release/community/roadmap/</a></p>
+<p><strong>Case Study</strong>: <a href="https://mindoff.work/projects/mindoff-dataport/">https://mindoff.work/projects/mindoff-dataport/</a></p>
 <h2 id="key-features">Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
 <ol>
 <li>
@@ -1595,46 +1647,42 @@
    Column occupation, alignment, and collision shifting are configurable at runtime, without touching the original template.</p>
 </li>
 </ol>
-<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
-<p>Streaming mode holds near-constant peak memory regardless of dataset size. These benchmarks compare it against raw openpyxl, xlsxwriter, and ReportLab loops with equivalent layout and styling (the most direct alternative).</p>
-<p><img alt="XLSX export: export time and peak memory at scale" src="https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_xlsx.png" /></p>
-<p><strong>Fig. 1: XLSX export.</strong> Left: wall-clock time for all Mindoff modes; both streaming and fidelity scale O(n) linearly. Right: peak RSS; Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size.</p>
-<p><img alt="PDF export: export time and peak memory at scale" src="https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_pdf.png" /></p>
-<p><strong>Fig. 2: PDF export.</strong> Left: wall-clock time; linear O(n) scaling. Right: peak RSS; Mindoff streaming vs. ReportLab raw loop.</p>
+<h2 id="why-not-just-openpyxl-reportlab-or-xlsxwriter">Why Not Just openpyxl, ReportLab, or XlsxWriter?<a class="headerlink" href="#why-not-just-openpyxl-reportlab-or-xlsxwriter" title="Permanent link">&para;</a></h2>
+<p>Those tools still matter here. <code>mindoff-dataport</code> builds on them instead of pretending they do not exist. The difference is where the work lives.</p>
 <table>
 <thead>
 <tr>
-<th>Scenario</th>
-<th>Mode</th>
-<th>Why</th>
+<th>If you build with...</th>
+<th>You usually own...</th>
+<th>What <code>mindoff-dataport</code> changes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>≤ 50K rows, full style fidelity</td>
-<td><code>export_mode="fidelity"</code></td>
-<td>Full merged-cell and style support; no streaming constraints</td>
+<td><code>openpyxl</code></td>
+<td>Cell-by-cell layout code, style copying, merge handling, row/column shifting, and workbook assembly</td>
+<td>You keep the layout in Excel and compile data into a reusable bundle before export</td>
 </tr>
 <tr>
-<td>&gt; 50K rows, XLSX</td>
-<td><code>export_mode="streaming"</code></td>
-<td>Near-constant memory regardless of row count</td>
+<td><code>reportlab</code></td>
+<td>A second PDF-specific layout system, plus duplicated styling decisions that drift from Excel over time</td>
+<td>The same compiled bundle exports to PDF, so the PDF path follows the template-driven plan instead of a separate document build</td>
 </tr>
 <tr>
-<td>Any size, PDF</td>
-<td>automatic</td>
-<td>PDF always paginates; no <code>export_mode</code> setting needed</td>
+<td><code>xlsxwriter</code></td>
+<td>Fast XLSX writing, but still your responsibility to recreate template structure and styling rules in code</td>
+<td>Streaming export keeps the write path efficient while the template and compile steps carry the layout contract</td>
 </tr>
 <tr>
-<td>&gt; 1M rows, split output</td>
-<td><code>streaming</code> + <code>max_rows_per_workbook</code></td>
-<td>Splits output across multiple workbook files</td>
+<td><code>mindoff-dataport</code></td>
+<td>An extra extract-and-compile step, plus some streaming constraints for very large exports</td>
+<td>In return, you get one template-driven workflow for <code>.xlsx</code> and <code>.pdf</code>, with less layout logic living in application code</td>
 </tr>
 </tbody>
 </table>
-<p>Full methodology, fairness notes, and instructions to reproduce the numbers yourself are in the <a href="https://dataport.mindoff.work/latest-release/architecture/benchmarking/">Benchmarking guide</a>.</p>
+<p>If your report is simple enough that raw workbook or PDF code stays readable, the lower-level libraries may be enough. This project is for the point where template fidelity, repeated exports, and layout drift start costing more than an extra compile step.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<p>Think of it like a mail merge for spreadsheets: you design the layout once in Excel, then the library fills in the data. Every report follows four steps: <strong>extract → inspect → compile → export</strong>.</p>
+<p>Think of it like a mail merge for spreadsheets: you design the layout once in Excel, then the library fills in the data. Every report follows four steps: <strong>extract -&gt; inspect -&gt; compile -&gt; export</strong>.</p>
 <h3 id="1-install-the-package">1. Install the Package<a class="headerlink" href="#1-install-the-package" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>mindoff-dataport
 </code></pre></div>
@@ -1675,6 +1723,45 @@
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">mo_dataport</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="n">bundle</span><span class="p">,</span> <span class="s2">&quot;invoice_filled.pdf&quot;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;pdf&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>When you're ready to go further (placeholders, the data contract, streaming, repeats, dynamic sheets, custom fonts, and the full API reference), head to the <a href="https://dataport.mindoff.work/latest-release/developer_guide/">developer guide</a>.</p>
+<p>If you want to see what is already covered and what is planned next, check the <a href="ROADMAP.md">roadmap</a>.</p>
+<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
+<p>Streaming mode holds near-constant peak memory regardless of dataset size. These benchmarks compare it against raw openpyxl, xlsxwriter, and ReportLab loops with equivalent layout and styling (the most direct alternative).</p>
+<p><img alt="XLSX export: export time and peak memory at scale" src="https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_xlsx.png" /></p>
+<p><strong>Fig. 1: XLSX export.</strong> Left: wall-clock time for all Mindoff modes; both streaming and fidelity scale O(n) linearly. Right: peak RSS; Mindoff streaming holds near-constant while openpyxl and xlsxwriter raw loops grow with dataset size.</p>
+<p><img alt="PDF export: export time and peak memory at scale" src="https://raw.githubusercontent.com/mindoffwork/mindoff-dataport/refs/heads/root/examples/benchmark/charts/benchmark_pdf.png" /></p>
+<p><strong>Fig. 2: PDF export.</strong> Left: wall-clock time; linear O(n) scaling. Right: peak RSS; Mindoff streaming vs. ReportLab raw loop.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Mode</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>&lt;= 50K rows, full style fidelity</td>
+<td><code>export_mode="fidelity"</code></td>
+<td>Full merged-cell and style support; no streaming constraints</td>
+</tr>
+<tr>
+<td>&gt; 50K rows, XLSX</td>
+<td><code>export_mode="streaming"</code></td>
+<td>Near-constant memory regardless of row count</td>
+</tr>
+<tr>
+<td>Any size, PDF</td>
+<td>automatic</td>
+<td>PDF always paginates; no <code>export_mode</code> setting needed</td>
+</tr>
+<tr>
+<td>&gt; 1M rows, split output</td>
+<td><code>streaming</code> + <code>max_rows_per_workbook</code></td>
+<td>Splits output across multiple workbook files</td>
+</tr>
+</tbody>
+</table>
+<p>Full methodology, fairness notes, and instructions to reproduce the numbers yourself are in the <a href="https://dataport.mindoff.work/latest-release/architecture/benchmarking/">Benchmarking guide</a>.</p>
 <h2 id="license">License<a class="headerlink" href="#license" title="Permanent link">&para;</a></h2>
 <p>Released under the <a href="https://github.com/mindoffwork/mindoff-dataport/blob/root/LICENSE">MIT License</a>.</p>
 

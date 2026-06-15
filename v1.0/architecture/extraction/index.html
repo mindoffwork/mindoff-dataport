@@ -1331,6 +1331,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../community/roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../community/contribution-guide/" class="md-nav__link">
         
   
@@ -1642,7 +1670,7 @@
 <li>It is <strong>complete</strong>: a renderer can reproduce the template from the schema alone.</li>
 <li>It is <strong>inert</strong>: extraction never writes back to the source file, and compilation never mutates the schema.</li>
 </ul>
-<p>Because <code>WorkbookSchema</code> is a plain Python dict, it serializes directly with <code>json.dump</code> / <code>json.load</code>. In production, extract once when the template changes, persist the result, and load from JSON on every subsequent compile — skipping the openpyxl <code>.xlsx</code> read entirely. See <a href="../../developer_guide/compiling-bundles/#5-cache-the-extracted-schema-in-production">Compiling Report Bundles: Cache the Extracted Schema in Production</a> for the full pattern.</p>
+<p>Because <code>WorkbookSchema</code> is a plain Python dict, it serializes directly with <code>json.dump</code> / <code>json.load</code>. In production, extract once when the template changes, persist the result, and load from JSON on every subsequent compile. This skips the openpyxl <code>.xlsx</code> read entirely. See <a href="../../developer_guide/compiling-bundles/#5-cache-the-extracted-schema-in-production">Compiling Report Bundles: Cache the Extracted Schema in Production</a> for the full pattern.</p>
 <h2 id="troubleshooting-extraction">Troubleshooting Extraction<a class="headerlink" href="#troubleshooting-extraction" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>A placeholder wasn't discovered.</strong> Verify the exact <code>{{key:type}}</code> syntax and a supported type; malformed markers are treated as plain text.</li>

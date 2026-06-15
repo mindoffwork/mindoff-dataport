@@ -337,6 +337,79 @@
 	padding-bottom: 1em;
 }
 
+/* Task lists */
+.md-typeset .task-list {
+	padding-left: 0;
+}
+
+.md-typeset .task-list-item {
+	--mo-task-box-left: -1.5em;
+	--mo-task-box-size: 1.08em;
+	--mo-task-box-top: 0.28em;
+	list-style: none;
+	margin-bottom: 0.55rem;
+}
+
+.md-typeset .task-list-item::marker {
+	content: "";
+}
+
+.md-typeset .task-list-item::before {
+	display: none;
+}
+
+.md-typeset .task-list-control {
+	pointer-events: none;
+}
+
+.md-typeset .task-list-control input {
+	pointer-events: none;
+}
+
+.md-typeset .task-list-indicator::before {
+	background-color: transparent;
+	border: 0.12rem solid var(--mo-ink);
+	border-radius: 0.26rem;
+	height: var(--mo-task-box-size);
+	mask-image: none;
+	-webkit-mask-image: none;
+	top: var(--mo-task-box-top);
+	width: var(--mo-task-box-size);
+}
+
+[dir="ltr"] .md-typeset .task-list-indicator::before {
+	left: var(--mo-task-box-left);
+}
+
+[dir="rtl"] .md-typeset .task-list-indicator::before {
+	right: var(--mo-task-box-left);
+}
+
+.md-typeset [type="checkbox"]:checked + .task-list-indicator::before {
+	background-color: var(--mo-green);
+	border-color: var(--mo-ink);
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.md-typeset [type="checkbox"]:checked + .task-list-indicator::after {
+	background-color: var(--mo-ink);
+	clip-path: polygon(14% 45%, 0 60%, 38% 100%, 100% 15%, 84% 0, 36% 66%);
+	content: "";
+	height: calc(var(--mo-task-box-size) * 0.48);
+	position: absolute;
+	top: calc(var(--mo-task-box-top) + var(--mo-task-box-size) * 0.26);
+	width: calc(var(--mo-task-box-size) * 0.58);
+}
+
+[dir="ltr"] .md-typeset [type="checkbox"]:checked + .task-list-indicator::after {
+	left: calc(var(--mo-task-box-left) + var(--mo-task-box-size) * 0.21);
+}
+
+[dir="rtl"] .md-typeset [type="checkbox"]:checked + .task-list-indicator::after {
+	right: calc(var(--mo-task-box-left) + var(--mo-task-box-size) * 0.21);
+}
+
 /* Admonitions */
 .md-typeset .admonition,
 .md-typeset details {
