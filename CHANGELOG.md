@@ -1,5 +1,10 @@
 <h1>Release Notes</h1>
 
+## Recent Changes
+
+### Documentation
+- 📝 Add roadmap and improve project documentation ([#19](https://github.com/mindoffwork/mindoff-dataport/pull/19))
+
 ## v1.0.0
 
 ### Documentation
