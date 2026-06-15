@@ -1,6 +1,6 @@
 <h1>Release Notes</h1>
 
-## Recent Changes
+## v1.0.1
 
 ### Documentation
 - 📝 Refresh roadmap docs and add code of conduct ([#20](https://github.com/mindoffwork/mindoff-dataport/pull/20))
