@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Internal
+- ⬆️ Update pytest requirement from <9.0,>=8.0 to >=8.0,<10.0 ([#27](https://github.com/mindoffwork/mindoff-dataport/pull/27))
 - ⬆️ Bump actions/setup-python from 5 to 6 ([#26](https://github.com/mindoffwork/mindoff-dataport/pull/26))
 - ⬆️ Bump actions/upload-artifact from 4 to 7 ([#25](https://github.com/mindoffwork/mindoff-dataport/pull/25))
 - ⬆️ Bump codecov/codecov-action from 4 to 7 ([#24](https://github.com/mindoffwork/mindoff-dataport/pull/24))
