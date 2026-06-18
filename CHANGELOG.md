@@ -1,5 +1,10 @@
 <h1>Release Notes</h1>
 
+## Recent Changes
+
+### Internal
+- 🔧 Add GitHub issue, PR, and Dependabot templates ([#21](https://github.com/mindoffwork/mindoff-dataport/pull/21))
+
 ## v1.0.1
 
 ### Documentation
