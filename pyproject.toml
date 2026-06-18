@@ -45,7 +45,7 @@ classifiers = [
 dependencies = [
   "openpyxl>=3.1.0,<4.0",
   "pyarrow>=15.0,<25.0",
-  "reportlab>=4.0,<5.0",
+  "reportlab>=4.0,<6.0",
   "xlsxwriter>=3.2.0,<4.0",
 ]
 
