@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Internal
+- ⬆️ Update reportlab requirement from <5.0,>=4.0 to >=4.0,<6.0 ([#29](https://github.com/mindoffwork/mindoff-dataport/pull/29))
 - ⬆️ Update pytest-cov requirement from <7.0,>=5.0 to >=5.0,<8.0 ([#28](https://github.com/mindoffwork/mindoff-dataport/pull/28))
 - ⬆️ Update pytest requirement from <9.0,>=8.0 to >=8.0,<10.0 ([#27](https://github.com/mindoffwork/mindoff-dataport/pull/27))
 - ⬆️ Bump actions/setup-python from 5 to 6 ([#26](https://github.com/mindoffwork/mindoff-dataport/pull/26))
