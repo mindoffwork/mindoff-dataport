@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Internal
+- ⬆️ Bump codecov/codecov-action from 4 to 7 ([#24](https://github.com/mindoffwork/mindoff-dataport/pull/24))
 - ⬆️ Bump actions/checkout from 4 to 6 ([#23](https://github.com/mindoffwork/mindoff-dataport/pull/23))
 - ⬆️ Bump actions/github-script from 7 to 9 ([#22](https://github.com/mindoffwork/mindoff-dataport/pull/22))
 - 🔧 Add GitHub issue, PR, and Dependabot templates ([#21](https://github.com/mindoffwork/mindoff-dataport/pull/21))
