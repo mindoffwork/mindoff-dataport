@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Python dependencies in pyproject.toml — keeps core and dev dependencies current.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: root
+    labels:
+      - internal
+    commit-message:
+      prefix: "⬆️"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions used in our workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: root
+    labels:
+      - internal
+    commit-message:
+      prefix: "⬆️"
