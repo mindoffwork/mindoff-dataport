@@ -3,6 +3,7 @@
 ## Recent Changes
 
 ### Internal
+- ⬆️ Bump actions/github-script from 7 to 9 ([#22](https://github.com/mindoffwork/mindoff-dataport/pull/22))
 - 🔧 Add GitHub issue, PR, and Dependabot templates ([#21](https://github.com/mindoffwork/mindoff-dataport/pull/21))
 
 ## v1.0.1
